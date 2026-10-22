@@ -1,0 +1,15 @@
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/build
+/app/build
+/captures
+.externalNativeBuild
+.cxx
+*.hprof
+/app/schemas/local
+
+# Built artifacts kept out of git (dist/app-debug.apk is produced by assembleDebug)
+/dist/
