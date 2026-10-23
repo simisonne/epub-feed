@@ -12,6 +12,8 @@ data class ParsedBook(
     val author: String,
     val chapters: List<ParsedChapter>,
     val coverBytes: ByteArray?,
+    val publisher: String? = null,
+    val publishedYear: String? = null,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true

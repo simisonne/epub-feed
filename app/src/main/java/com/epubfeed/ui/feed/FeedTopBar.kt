@@ -16,6 +16,9 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -33,7 +36,7 @@ import androidx.compose.ui.unit.sp
 import com.epubfeed.ui.components.BookAvatar
 import com.epubfeed.ui.theme.LocalXColors
 
-val FeedTabs = listOf("Feed", "Chapters", "Saved")
+val FeedTabs = listOf("Feed", "Chapters", "Likes", "Saved")
 
 /**
  * Sticky header: book identity on the left (the "account"), Aa on the right, the tab
@@ -65,16 +68,21 @@ fun FeedTopBar(
                 .padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            BookAvatar(
-                coverPath = coverPath,
-                title = title,
-                hue = hue,
-                size = 32.dp,
+            Box(
                 modifier = Modifier
+                    .size(44.dp)
                     .clip(CircleShape)
                     .clickable(onClick = onAvatarClick)
                     .semantics { contentDescription = "Open library" },
-            )
+                contentAlignment = Alignment.Center,
+            ) {
+                BookAvatar(
+                    coverPath = coverPath,
+                    title = title,
+                    hue = hue,
+                    size = 32.dp,
+                )
+            }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(
@@ -97,12 +105,11 @@ fun FeedTopBar(
             }
             Spacer(Modifier.width(8.dp))
             IconButton(onClick = onSettingsClick, modifier = Modifier.size(44.dp)) {
-                Text(
-                    text = "Aa",
-                    color = x.text,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.semantics { contentDescription = "Reading settings" },
+                Icon(
+                    imageVector = Icons.Filled.Settings,
+                    contentDescription = "Reading settings",
+                    tint = x.text,
+                    modifier = Modifier.size(21.dp),
                 )
             }
         }

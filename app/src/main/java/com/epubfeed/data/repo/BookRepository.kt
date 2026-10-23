@@ -9,14 +9,18 @@ import com.epubfeed.data.local.BookDao
 import com.epubfeed.data.local.BookEntity
 import com.epubfeed.data.local.ChapterDao
 import com.epubfeed.data.local.ChapterEntity
+import com.epubfeed.data.local.NoteDao
+import com.epubfeed.data.local.NoteEntity
 import com.epubfeed.data.local.PostDao
 import com.epubfeed.data.local.PostEntity
 import com.epubfeed.data.local.PostRow
 import com.epubfeed.data.local.ReactionDao
 import com.epubfeed.data.local.ReactionEntity
+import com.epubfeed.data.local.StatsDao
 import com.epubfeed.data.prefs.SettingsRepository
 import com.epubfeed.domain.PostGenerator
 import com.epubfeed.domain.model.Block
+import com.epubfeed.domain.model.BlockType
 import com.epubfeed.domain.model.ChapterSummary
 import com.epubfeed.domain.model.FeedPost
 import com.epubfeed.domain.model.PostLength
@@ -27,14 +31,27 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlin.math.roundToInt
+
+/** A chapter as it will be written back: a title and its original source blocks. */
+private data class ChapterSlice(val title: String, val blocks: List<Block>)
+
+/** A reaction waiting to be re-attached after the posts were regenerated. */
+private data class ReactionCarry(
+    val offset: Int,
+    val liked: Boolean,
+    val bookmarked: Boolean,
+    val updatedAt: Long,
+)
+
+/** A note waiting to be re-attached after the posts were regenerated. */
+private data class NoteCarry(val offset: Int, val note: NoteEntity)
 
 @Singleton
 class BookRepository @Inject constructor(
@@ -44,6 +61,8 @@ class BookRepository @Inject constructor(
     private val chapterDao: ChapterDao,
     private val postDao: PostDao,
     private val reactionDao: ReactionDao,
+    private val noteDao: NoteDao,
+    private val statsDao: StatsDao,
     private val settings: SettingsRepository,
     private val generator: PostGenerator,
     private val json: Json,
@@ -57,11 +76,17 @@ class BookRepository @Inject constructor(
 
     suspend fun anyBooks(): Boolean = bookDao.count() > 0
 
-    fun observePosts(bookId: String, start: Int, end: Int): Flow<List<FeedPost>> =
-        postDao.observeWindow(bookId, start, end).map { rows -> rows.map { it.toFeedPost() } }
+    /** One chapter is one feed: the whole chapter arrives in order. */
+    fun observeChapterPosts(bookId: String, chapterIndex: Int): Flow<List<FeedPost>> =
+        postDao.observeChapter(bookId, chapterIndex).map { rows -> rows.map { it.toFeedPost() } }
+
+    fun observeLiked(bookId: String): Flow<List<FeedPost>> =
+        postDao.observeLiked(bookId).map { rows -> rows.map { it.toFeedPost() } }
 
     fun observeSaved(bookId: String): Flow<List<FeedPost>> =
         postDao.observeSaved(bookId).map { rows -> rows.map { it.toFeedPost() } }
+
+    fun observeNotes(bookId: String): Flow<List<NoteEntity>> = noteDao.observeForBook(bookId)
 
     fun observeChapters(bookId: String): Flow<List<ChapterSummary>> =
         chapterDao.observeRows(bookId).map { rows ->
@@ -77,6 +102,9 @@ class BookRepository @Inject constructor(
             }
         }
 
+    fun observeReadingSeconds(bookId: String): Flow<Long> =
+        statsDao.observe(bookId).map { it?.secondsRead ?: 0L }
+
     suspend fun firstPostIndex(bookId: String): Int = postDao.firstIndexForBook(bookId) ?: 0
 
     suspend fun lastPostIndex(bookId: String): Int = postDao.lastIndexForBook(bookId) ?: 0
@@ -88,24 +116,58 @@ class BookRepository @Inject constructor(
     /**
      * Position writes are debounced in an app scoped coroutine so a fling does not
      * hammer SQLite, and so the last write still lands after the screen is gone.
+     *
+     * The pending position is always replaced, but the timer only restarts when the
+     * index actually changed. Cancelling the job and then returning early (the old
+     * behaviour) meant a run of single-post moves cancelled the only pending write
+     * and never scheduled another one, so nothing was ever persisted.
      */
     fun saveReadingPositionAsync(bookId: String, index: Int) {
-        val previous = pendingPosition
+        val scheduled = pendingPosition
         pendingPosition = bookId to index
+        if (scheduled != null && scheduled.first == bookId && scheduled.second == index) return
         positionJob?.cancel()
-        // Jitter of a single post never needs its own write: keep the last saved spot.
-        if (previous != null && previous.first == bookId && kotlin.math.abs(previous.second - index) < 2) return
         positionJob = ioScope.launch {
             delay(POSITION_DEBOUNCE_MS)
-            pendingPosition?.let { (id, position) -> bookDao.updateLastPostIndex(id, position) }
+            val (id, position) = pendingPosition ?: return@launch
+            bookDao.updateLastPostIndex(id, position)
         }
     }
 
     fun saveReadingPositionNow(bookId: String, index: Int) {
         pendingPosition = bookId to index
         positionJob?.cancel()
+        positionJob = null
         ioScope.launch { bookDao.updateLastPostIndex(bookId, index) }
     }
+
+    suspend fun addReadingSeconds(bookId: String, seconds: Long) {
+        if (seconds <= 0L) return
+        db.withTransaction {
+            if (statsDao.secondsFor(bookId) == null) {
+                statsDao.upsert(com.epubfeed.data.local.BookStatsEntity(bookId, 0))
+            }
+            statsDao.addSeconds(bookId, seconds)
+        }
+    }
+
+    suspend fun addNote(postId: String, text: String): Boolean {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return false
+        val post = postDao.get(postId) ?: return false
+        noteDao.upsert(
+            NoteEntity(
+                id = UUID.randomUUID().toString(),
+                postId = postId,
+                bookId = post.bookId,
+                text = trimmed.take(NOTE_LIMIT),
+                createdAt = System.currentTimeMillis(),
+            ),
+        )
+        return true
+    }
+
+    suspend fun deleteNote(noteId: String) = noteDao.delete(noteId)
 
     suspend fun toggleLike(postId: String) {
         val post = postDao.get(postId) ?: return
@@ -139,9 +201,23 @@ class BookRepository @Inject constructor(
         }
     }
 
+    /** Books imported before the word count column existed get it filled on first use. */
+    suspend fun ensureWordCount(bookId: String): Int {
+        val book = bookDao.get(bookId) ?: return 0
+        if (book.wordCount > 0) return book.wordCount
+        val posts = postDao.allForBook(bookId)
+        if (posts.isEmpty()) return 0
+        val words = posts.sumOf { post ->
+            post.plainText.split(' ', '\n').count { it.isNotBlank() }
+        }
+        bookDao.updateWordCount(bookId, words)
+        return words
+    }
+
     suspend fun deleteBook(bookId: String) {
         val book = bookDao.get(bookId)
         bookDao.delete(bookId)
+        statsDao.deleteForBook(bookId)
         book?.coverPath?.let { path -> runCatching { File(path).delete() } }
         if (settings.currentLastBookId() == bookId) {
             settings.setLastBookId(bookDao.all().firstOrNull()?.id)
@@ -177,6 +253,7 @@ class BookRepository @Inject constructor(
 
         val coverPath = writeCover(bookId, parsed.coverBytes)
         var global = 0
+        var words = 0
         val posts = ArrayList<PostEntity>()
         val counts = IntArray(chapterEntities.size)
 
@@ -186,6 +263,7 @@ class BookRepository @Inject constructor(
             counts[chapter.index] = generated.size
             chapter.postCount = generated.size
             generated.forEach { post ->
+                words += post.plainText.split(' ', '\n').count { it.isNotBlank() }
                 posts += PostEntity(
                     id = postId(bookId, chapter.index, post.indexInChapter),
                     bookId = bookId,
@@ -215,6 +293,9 @@ class BookRepository @Inject constructor(
             isSample = isSample,
             postCount = global,
             chapterCount = chapterEntities.size,
+            publisher = parsed.publisher,
+            publishedYear = parsed.publishedYear,
+            wordCount = words,
         )
 
         db.withTransaction {
@@ -228,42 +309,136 @@ class BookRepository @Inject constructor(
 
     /**
      * Re-splits every chapter with a new post length. Reading position and all likes /
-     * bookmarks are carried over by anchoring reactions to the source paragraph range.
+     * bookmarks / notes are carried over by anchoring them to the book-wide block offset.
      */
     suspend fun setPostLength(bookId: String, length: PostLength): Int {
         val book = bookDao.get(bookId) ?: return 0
-        val chapters = chapterDao.listForBook(bookId)
+        val chapters = chapterDao.listForBook(bookId).sortedBy { it.index }
         if (chapters.isEmpty()) return book.lastPostIndex
+        val slices = chapters.map { ChapterSlice(it.title, decode(it.blocksJson)) }
+        val prefix = prefixSums(slices.map { it.blocks.size })
+        val current = postDao.getAt(bookId, book.lastPostIndex)
+        val target = current?.let { offsetOf(it, prefix) } ?: 0
+        return rebuild(bookId, slices, target, length)
+    }
 
-        val anchors = reactionDao.anchorsForBook(bookId)
-        val currentPost = postDao.getAt(bookId, book.lastPostIndex)
-            ?: postDao.allForBook(bookId).firstOrNull { it.globalIndex >= book.lastPostIndex }
-        val anchorChapterIndex = currentPost?.chapterIndex ?: 0
-        val chapterPosts = currentPost?.let { postDao.forChapter(it.chapterId) } ?: emptyList()
-        val fractionInChapter = if (chapterPosts.size <= 1) 0f else {
-            val pos = chapterPosts.indexOfFirst { it.globalIndex == currentPost?.globalIndex }
-            if (pos < 0) 0f else pos.toFloat() / (chapterPosts.size - 1)
+    /**
+     * Manual chapter correction. The reader marks a post as the start of a new chapter
+     * because the book's own chapter detection was wrong: the post's first source block
+     * becomes the first block of a new chapter, everything is regenerated, and the feed
+     * comes back parked on that chapter.
+     *
+     * Returns the global post index to view, or -1 when the post already starts a chapter.
+     */
+    suspend fun markAsChapter(bookId: String, globalIndex: Int): Int {
+        val book = bookDao.get(bookId) ?: return -1
+        val chapters = chapterDao.listForBook(bookId).sortedBy { it.index }
+        if (chapters.isEmpty()) return -1
+        val post = postDao.getAt(bookId, globalIndex) ?: return -1
+        val ci = chapters.indexOfFirst { it.index == post.chapterIndex }
+        if (ci < 0) return -1
+        // A chapter always opens with its title post, so the title post and the first body
+        // post both already start a chapter.
+        if (post.isChapterTitlePost || post.firstBlock <= 0) return -1
+
+        val slices = chapters.map { ChapterSlice(it.title, decode(it.blocksJson)) }.toMutableList()
+        val blocks = slices[ci].blocks
+        if (post.firstBlock >= blocks.size) return -1
+        val head = blocks.subList(0, post.firstBlock)
+        val tail = blocks.subList(post.firstBlock, blocks.size)
+        if (head.isEmpty() || tail.isEmpty()) return -1
+
+        val newTitle = chapterTitleFor(tail, "Chapter ${ci + 2}")
+        slices[ci] = ChapterSlice(slices[ci].title, head)
+        slices.add(ci + 1, ChapterSlice(newTitle, tail))
+
+        val prefix = prefixSums(slices.map { it.blocks.size })
+        val target = -(prefix[ci + 1] + 1) // open the new chapter, at its title post
+        return rebuild(bookId, slices, target, currentLength())
+    }
+
+    /**
+     * Undoes a [markAsChapter]: the chapter is folded back into the one before it and the
+     * feed comes back parked on the post that used to open it.
+     *
+     * Returns the global post index to view, or -1 when the chapter cannot be merged.
+     */
+    suspend fun unmarkChapter(bookId: String, chapterIndex: Int): Int {
+        val book = bookDao.get(bookId) ?: return -1
+        val chapters = chapterDao.listForBook(bookId).sortedBy { it.index }
+        if (chapters.size < 2) return -1
+        val ci = chapters.indexOfFirst { it.index == chapterIndex }
+        if (ci <= 0) return -1
+
+        val slices = chapters.map { ChapterSlice(it.title, decode(it.blocksJson)) }.toMutableList()
+        val before = slices[ci - 1]
+        val current = slices[ci]
+        val merged = ChapterSlice(before.title, before.blocks + current.blocks)
+        val prefixBefore = prefixSums(slices.map { it.blocks.size })
+        val target = prefixBefore[ci] // where the folded chapter's content now begins
+        slices[ci - 1] = merged
+        slices.removeAt(ci)
+        return rebuild(bookId, slices, target, currentLength())
+    }
+
+    /**
+     * Writes a whole new chapter structure for a book: chapters, posts, reactions, notes and
+     * reading position, in one transaction.
+     *
+     * Everything the reader attached to a post is anchored to a book-wide block offset, so
+     * it survives chapter boundaries moving (a split, a merge or a different post length).
+     */
+    private suspend fun rebuild(
+        bookId: String,
+        slices: List<ChapterSlice>,
+        targetOffset: Int,
+        length: PostLength,
+    ): Int {
+        if (slices.isEmpty()) return -1
+        val oldChapters = chapterDao.listForBook(bookId).sortedBy { it.index }
+        val oldPrefix = prefixSums(oldChapters.map { decode(it.blocksJson).size })
+        val oldPosts = postDao.allForBook(bookId)
+        val byId = oldPosts.associateBy { it.id }
+        val indexById = oldChapters.associate { it.id to it.index }
+
+        fun offsetOfPost(post: PostEntity): Int? {
+            val ci = indexById[post.chapterId] ?: return null
+            return offsetOf(post, oldPrefix, ci)
         }
 
-        var newPosition = 0
-        var global = 0
-        val newPosts = ArrayList<PostEntity>()
-        val newReactions = ArrayList<ReactionEntity>()
-        val counts = HashMap<Int, Int>()
-        val starts = HashMap<Int, Int>()
+        val reactions = reactionDao.forBook(bookId).mapNotNull { reaction ->
+            val post = byId[reaction.postId] ?: return@mapNotNull null
+            val offset = offsetOfPost(post) ?: return@mapNotNull null
+            ReactionCarry(offset, reaction.liked, reaction.bookmarked, reaction.updatedAt)
+        }
+        val notes = noteDao.forBook(bookId).mapNotNull { note ->
+            val post = byId[note.postId] ?: return@mapNotNull null
+            val offset = offsetOfPost(post) ?: return@mapNotNull null
+            NoteCarry(offset, note)
+        }
 
-        chapters.sortedBy { it.index }.forEach { chapter ->
-            val blocks = json.decodeFromString(ListSerializer, chapter.blocksJson)
-            val generated = generator.generate(chapter.title, blocks, length)
-            starts[chapter.index] = global
-            counts[chapter.index] = generated.size
+        // Generate the new structure in memory first: anchors are resolved against it.
+        val newPrefix = prefixSums(slices.map { it.blocks.size })
+        val newChapters = ArrayList<ChapterEntity>(slices.size)
+        val newPosts = ArrayList<PostEntity>()
+        var global = 0
+        slices.forEachIndexed { ci, slice ->
+            val chapterId = chapterId(bookId, ci)
+            val generated = generator.generate(slice.title, slice.blocks, length)
+            newChapters += ChapterEntity(
+                id = chapterId,
+                bookId = bookId,
+                index = ci,
+                title = slice.title,
+                blocksJson = json.encodeToString(ListSerializer, slice.blocks),
+                postCount = generated.size,
+            )
             generated.forEach { post ->
-                val id = postId(bookId, chapter.index, post.indexInChapter)
                 newPosts += PostEntity(
-                    id = id,
+                    id = postId(bookId, ci, post.indexInChapter),
                     bookId = bookId,
-                    chapterId = chapter.id,
-                    chapterIndex = chapter.index,
+                    chapterId = chapterId,
+                    chapterIndex = ci,
                     indexInChapter = post.indexInChapter,
                     globalIndex = global,
                     blocksJson = json.encodeToString(ListSerializer, post.blocks),
@@ -276,41 +451,103 @@ class BookRepository @Inject constructor(
             }
         }
 
-        // Map every reaction onto the new post that covers the same source paragraphs.
-        val byChapter = newPosts.groupBy { it.chapterId }
-        anchors.forEach { anchor ->
-            val target = if (anchor.firstBlock < 0) {
-                byChapter[anchor.chapterId]?.firstOrNull { it.isChapterTitlePost }
-            } else {
-                byChapter[anchor.chapterId]?.firstOrNull {
-                    !it.isChapterTitlePost && anchor.firstBlock >= it.firstBlock && anchor.firstBlock <= it.lastBlock
-                }
-            } ?: return@forEach
-            newReactions += ReactionEntity(
-                postId = target.id,
+        val postsByChapter = newPosts.groupBy { it.chapterIndex }
+
+        /**
+         * The post that covers [anchor]. A body post anchors to its book-wide source block
+         * offset (always >= 0); a chapter's title post anchors to `-(start + 1)`, which keeps
+         * "open of chapter N" distinct from "last block of chapter N - 1".
+         */
+        fun locate(anchor: Int): PostEntity? {
+            if (anchor < 0) {
+                val start = -anchor - 1
+                val ci = newPrefix.indexOfFirst { it == start }
+                val chapterPosts = postsByChapter[if (ci < 0) 0 else ci] ?: return null
+                return chapterPosts.firstOrNull { it.isChapterTitlePost } ?: chapterPosts.firstOrNull()
+            }
+            var ci = 0
+            for (i in newPrefix.indices) {
+                if (newPrefix[i] <= anchor) ci = i else break
+            }
+            val chapterPosts = postsByChapter[ci] ?: return null
+            val local = anchor - newPrefix[ci]
+            return chapterPosts.firstOrNull {
+                !it.isChapterTitlePost && local >= it.firstBlock && local <= it.lastBlock
+            } ?: chapterPosts.firstOrNull { !it.isChapterTitlePost && it.firstBlock >= local }
+                ?: chapterPosts.firstOrNull { !it.isChapterTitlePost }
+                ?: chapterPosts.firstOrNull()
+        }
+
+        val newReactions = reactions.mapNotNull { carry ->
+            val post = locate(carry.offset) ?: return@mapNotNull null
+            ReactionEntity(
+                postId = post.id,
                 bookId = bookId,
-                liked = anchor.liked,
-                bookmarked = anchor.bookmarked,
-                updatedAt = anchor.updatedAt,
+                liked = carry.liked,
+                bookmarked = carry.bookmarked,
+                updatedAt = carry.updatedAt,
             )
         }
+        val newNotes = notes.mapNotNull { carry ->
+            val post = locate(carry.offset) ?: return@mapNotNull null
+            carry.note.copy(postId = post.id)
+        }
 
-        val chapterCount = counts[anchorChapterIndex] ?: 1
-        val chapterStart = starts[anchorChapterIndex] ?: 0
-        newPosition = (chapterStart + (fractionInChapter * (chapterCount - 1)).roundToInt())
-            .coerceIn(0, (global - 1).coerceAtLeast(0))
+        val position = locate(targetOffset)?.globalIndex ?: 0
+        val words = newPosts.sumOf { it.plainText.split(' ', '\n').count { w -> w.isNotBlank() } }
 
         db.withTransaction {
-            postDao.deleteForBook(bookId)
-            chapterDao.listForBook(bookId).forEach { chapter ->
-                chapterDao.updatePostCount(chapter.id, counts[chapter.index] ?: chapter.postCount)
-            }
+            postDao.deleteForBook(bookId) // cascades reactions + notes
+            reactionDao.deleteForBook(bookId)
+            noteDao.deleteForBook(bookId)
+            chapterDao.deleteForBook(bookId)
+            chapterDao.insertAll(newChapters)
             newPosts.chunked(INSERT_CHUNK).forEach { postDao.insertAll(it) }
             newReactions.chunked(INSERT_CHUNK).forEach { reactionDao.insertAll(it) }
-            bookDao.updateCounts(bookId, global, chapters.size)
-            bookDao.updateLastPostIndex(bookId, newPosition)
+            newNotes.chunked(INSERT_CHUNK).forEach { noteDao.insertAll(it) }
+            bookDao.updateStructure(bookId, global, newChapters.size, words, position)
         }
-        return newPosition
+        return position
+    }
+
+    /** See [rebuild]'s locate: titles are negative so they can never collide with a block. */
+    private fun offsetOf(post: PostEntity, prefix: IntArray, chapterIndex: Int? = null): Int {
+        val ci = chapterIndex ?: post.chapterIndex
+        val base = prefix.getOrElse(ci) { 0 }
+        return if (post.isChapterTitlePost) -(base + 1) else base + post.firstBlock
+    }
+
+    private fun prefixSums(sizes: List<Int>): IntArray {
+        val out = IntArray(sizes.size)
+        var acc = 0
+        sizes.forEachIndexed { index, size ->
+            out[index] = acc
+            acc += size
+        }
+        return out
+    }
+
+    private suspend fun currentLength(): PostLength = settings.currentSettings().postLength
+
+    /**
+     * A title for a chapter the reader created by hand. The first heading is used when the
+     * chapter opens with one, otherwise a short label: a long sentence makes an ugly
+     * heading, so it is cut at a word boundary and stripped of dangling punctuation.
+     */
+    private fun chapterTitleFor(blocks: List<Block>, fallback: String): String {
+        val source = blocks.firstOrNull { it.type == BlockType.HEADING && it.text.isNotBlank() }?.text
+            ?: blocks.firstOrNull { it.text.isNotBlank() }?.text
+            ?: return fallback
+        val clean = source.trim()
+        val limit = 64
+        val shortened = if (clean.length <= limit) {
+            clean
+        } else {
+            val cut = clean.take(limit)
+            val space = cut.lastIndexOf(' ')
+            (if (space > 24) cut.substring(0, space) else cut).trimEnd()
+        }
+        return shortened.trimEnd(' ', ',', ';', ':', '-', '\u2014', '\u2013').ifBlank { fallback }
     }
 
     private suspend fun transactionally(block: suspend () -> Unit) {
@@ -343,12 +580,15 @@ class BookRepository @Inject constructor(
         plainText = plainText,
     )
 
+    private fun decode(blocksJson: String): List<Block> = decodeBlocks(blocksJson)
+
     fun decodeBlocks(blocksJson: String): List<Block> =
         runCatching { json.decodeFromString(ListSerializer, blocksJson) }.getOrDefault(emptyList())
 
     companion object {
         private const val INSERT_CHUNK = 500
         private const val POSITION_DEBOUNCE_MS = 700L
+        const val NOTE_LIMIT = 280
         private val ListSerializer = kotlinx.serialization.builtins.ListSerializer(Block.serializer())
 
         fun chapterId(bookId: String, index: Int): String = "$bookId:$index"

@@ -3,6 +3,7 @@ package com.epubfeed.ui.feed
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,6 +23,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.CircularProgressIndicator
@@ -41,11 +46,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -58,6 +61,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.epubfeed.domain.model.FeedPost
 import com.epubfeed.domain.model.UserSettings
@@ -69,9 +75,10 @@ import com.epubfeed.ui.settings.SettingsActions
 import com.epubfeed.ui.settings.SettingsSheet
 import com.epubfeed.ui.theme.LocalXColors
 import com.epubfeed.ui.theme.readingFontFamily
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 private val MIME_TYPES = arrayOf("application/epub+zip", "application/pdf")
 
@@ -81,6 +88,7 @@ fun FeedScreen(
     settings: UserSettings,
     settingsActions: SettingsActions,
     onImportUri: (Uri) -> Unit,
+    onOpenProfile: (String) -> Unit,
     viewModel: FeedViewModel = hiltViewModel(),
 ) {
     val ui by viewModel.uiState.collectAsStateWithLifecycle()
@@ -91,9 +99,11 @@ fun FeedScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val listState = rememberLazyListState()
+    val pagerState = rememberPagerState(initialPage = 0) { FeedTabs.size }
 
-    var tab by rememberSaveable { mutableIntStateOf(0) }
-    var showSettings by rememberSaveable { mutableStateOf(false) }
+    var showSettings by remember { mutableStateOf(false) }
+    var noteTarget by remember { mutableStateOf<FeedPost?>(null) }
+    var menuTarget by remember { mutableStateOf<FeedPost?>(null) }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) onImportUri(uri)
@@ -103,6 +113,21 @@ fun FeedScreen(
         onDispose { viewModel.savePositionNow() }
     }
 
+    // The reading clock only runs while the app is actually in front.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> viewModel.onScreenResumed()
+                Lifecycle.Event.ON_PAUSE -> viewModel.onScreenPaused()
+                Lifecycle.Event.ON_STOP -> viewModel.savePositionNow()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     BackHandler(enabled = drawerState.isOpen) {
         scope.launch { drawerState.close() }
     }
@@ -110,7 +135,7 @@ fun FeedScreen(
     val book = ui.book
     val readingSize = settings.textSize.sp.sp
     val readingFamily = readingFontFamily(settings.readingFont)
-    val pinnedVisible = book?.isSample == true && ui.windowStart == 0
+    val pinnedVisible = book?.isSample == true && ui.chapterIndex == 0
     val leading = if (pinnedVisible) 1 else 0
 
     fun copyToClipboard(text: String, message: String) {
@@ -129,6 +154,12 @@ fun FeedScreen(
             )
             if (result == SnackbarResult.ActionPerformed) openShareSheet(context, text)
         }
+    }
+
+    // Leaving the feed (a swipe to another tab) persists the place immediately.
+    LaunchedEffect(pagerState.settledPage) {
+        if (pagerState.settledPage != 0) viewModel.savePositionNow()
+        viewModel.onReadingInteraction()
     }
 
     ModalNavigationDrawer(
@@ -165,19 +196,22 @@ fun FeedScreen(
             },
             topBar = {
                 FeedTopBar(
-                    title = book?.title ?: "Epub Feed",
+                    title = book?.title ?: "ePUB Feed",
                     author = book?.author.orEmpty(),
                     coverPath = book?.coverPath,
                     hue = book?.hue ?: 210,
                     progress = if (book != null && book.postCount > 0) {
-                        (book.lastPostIndex + 1).toFloat() / book.postCount
+                        (ui.currentIndex + 1).toFloat() / book.postCount
                     } else {
                         0f
                     },
-                    selectedTab = tab,
+                    selectedTab = pagerState.currentPage,
                     onAvatarClick = { scope.launch { drawerState.open() } },
                     onSettingsClick = { showSettings = true },
-                    onTabSelected = { tab = it },
+                    onTabSelected = { selected ->
+                        viewModel.onReadingInteraction()
+                        scope.launch { pagerState.animateScrollToPage(selected) }
+                    },
                 )
             },
             floatingActionButton = {
@@ -185,7 +219,7 @@ fun FeedScreen(
                     onClick = { picker.launch(MIME_TYPES) },
                     containerColor = x.accent,
                     contentColor = Color.White,
-                    shape = androidx.compose.foundation.shape.CircleShape,
+                    shape = RoundedCornerShape(999.dp),
                 ) {
                     Icon(
                         imageVector = Icons.Filled.Edit,
@@ -203,79 +237,79 @@ fun FeedScreen(
                 when {
                     ui.loading -> LoadingState()
                     book == null -> EmptyLibraryState(onAddBook = { picker.launch(MIME_TYPES) })
-                    tab == 0 -> {
-                        LazyColumn(
-                            state = listState,
-                            modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(bottom = 96.dp),
-                        ) {
-                            if (pinnedVisible) {
-                                item(key = "pinned-welcome") {
-                                    PinnedWelcomePost(
-                                        displayName = book.title,
-                                        handle = handleFor(book.author),
-                                        coverPath = book.coverPath,
-                                        hue = book.hue,
-                                        onAddBook = { picker.launch(MIME_TYPES) },
-                                    )
-                                    HorizontalDivider(color = x.divider, thickness = 1.dp)
-                                }
-                            }
-                            itemsIndexed(ui.posts, key = { _, post -> post.id }) { index, post ->
-                                val next = ui.posts.getOrNull(index + 1)
-                                val previous = ui.posts.getOrNull(index - 1)
-                                PostCard(
-                                    post = post,
-                                    displayName = book.title,
-                                    handle = handleFor(book.author),
-                                    coverPath = book.coverPath,
-                                    hue = book.hue,
-                                    showThreadLine = next != null && next.chapterIndex == post.chapterIndex,
-                                    showChapterDivider = previous != null && previous.chapterIndex != post.chapterIndex,
-                                    readingFontSize = readingSize,
-                                    readingFontFamily = readingFamily,
-                                    viewsLabel = percentLabel(post.globalIndex, ui.totalPosts),
-                                    onLike = { viewModel.toggleLike(post) },
-                                    onBookmark = { viewModel.toggleBookmark(post) },
-                                    onShare = { sharePost(post) },
-                                    onCopy = {
-                                        copyToClipboard(
-                                            postText(post, book.author, book.title),
-                                            "Post copied",
-                                        )
-                                    },
-                                )
-                                HorizontalDivider(color = x.divider, thickness = 1.dp)
-                            }
-                            item(key = "feed-bottom") { Spacer(Modifier.height(8.dp)) }
+                    else -> HorizontalPager(
+                        state = pagerState,
+                        modifier = Modifier.fillMaxSize(),
+                        key = { it },
+                    ) { page ->
+                        when (page) {
+                            0 -> ChapterFeed(
+                                posts = ui.posts,
+                                notes = ui.notes,
+                                book = book,
+                                displayName = book.title,
+                                handle = handleFor(book.author),
+                                readingSize = readingSize,
+                                readingFamily = readingFamily,
+                                totalPosts = ui.totalPosts,
+                                pinnedVisible = pinnedVisible,
+                                leading = leading,
+                                listState = listState,
+                                chapterTitle = ui.chapterTitle,
+                                chapterIndex = ui.chapterIndex,
+                                hasNextChapter = ui.hasNextChapter,
+                                nextChapterTitle = ui.chapters.getOrNull(ui.chapterIndex + 1)?.title,
+                                scrollTarget = ui.scrollTarget,
+                                onVisibleListIndex = viewModel::onVisibleListIndex,
+                                onConsumeScrollTarget = viewModel::consumeScrollTarget,
+                                onInteraction = viewModel::onReadingInteraction,
+                                onLike = { viewModel.toggleLike(it) },
+                                onBookmark = { viewModel.toggleBookmark(it) },
+                                onNote = { noteTarget = it },
+                                onShare = { sharePost(it) },
+                                onCopy = { copyToClipboard(postText(it, book.author, book.title), "Post copied") },
+                                onDeleteNote = { viewModel.deleteNote(it.id) },
+                                onLongPress = { menuTarget = it },
+                                onAvatarClick = { onOpenProfile(book.id) },
+                                onNextChapter = { viewModel.nextChapter() },
+                                onAddBook = { picker.launch(MIME_TYPES) },
+                            )
+                            1 -> ChaptersTab(
+                                chapters = ui.chapters,
+                                lastPostIndex = ui.currentIndex,
+                                onChapterClick = { firstIndex ->
+                                    // The chapters list reports the chapter's first post, not
+                                    // its position in the list.
+                                    viewModel.openPost(firstIndex)
+                                    scope.launch { pagerState.animateScrollToPage(0) }
+                                },
+                            )
+                            else -> CollectionPage(
+                                liked = page == 2,
+                                likedPosts = ui.likedPosts,
+                                savedPosts = ui.savedPosts,
+                                notes = ui.notes,
+                                book = book,
+                                displayName = book.title,
+                                handle = handleFor(book.author),
+                                readingSize = readingSize,
+                                readingFamily = readingFamily,
+                                totalPosts = ui.totalPosts,
+                                onLike = { viewModel.toggleLike(it) },
+                                onBookmark = { viewModel.toggleBookmark(it) },
+                                onComment = { noteTarget = it },
+                                onShare = { sharePost(it) },
+                                onCopy = { copyToClipboard(postText(it, book.author, book.title), "Post copied") },
+                                onDeleteNote = { viewModel.deleteNote(it.id) },
+                                onAvatarClick = { onOpenProfile(book.id) },
+                                onLongPress = { menuTarget = it },
+                                onOpen = { opened ->
+                                    viewModel.openPost(opened.globalIndex)
+                                    scope.launch { pagerState.animateScrollToPage(0) }
+                                },
+                            )
                         }
                     }
-                    tab == 1 -> ChaptersTab(
-                        chapters = ui.chapters,
-                        lastPostIndex = book.lastPostIndex,
-                        onChapterClick = { index ->
-                            viewModel.jumpTo(index)
-                            tab = 0
-                        },
-                    )
-                    else -> SavedTab(
-                        posts = ui.savedPosts,
-                        displayName = book.title,
-                        handle = handleFor(book.author),
-                        coverPath = book.coverPath,
-                        hue = book.hue,
-                        readingFontSize = readingSize,
-                        readingFontFamily = readingFamily,
-                        totalPosts = ui.totalPosts,
-                        onLike = { viewModel.toggleLike(it) },
-                        onBookmark = { viewModel.toggleBookmark(it) },
-                        onShare = { sharePost(it) },
-                        onCopy = { copyToClipboard(postText(it, book.author, book.title), "Post copied") },
-                        onOpen = { saved ->
-                            viewModel.jumpTo(saved.globalIndex)
-                            tab = 0
-                        },
-                    )
                 }
 
                 if (ui.busyMessage != null) {
@@ -306,42 +340,292 @@ fun FeedScreen(
         )
     }
 
-    // Report the visible window so the ViewModel can grow it and save the position.
-    LaunchedEffect(listState, leading, ui.posts.size, ui.windowStart) {
-        snapshotFlow {
-            val info = listState.layoutInfo
-            val first = info.visibleItemsInfo.firstOrNull()?.index ?: 0
-            val last = info.visibleItemsInfo.lastOrNull()?.index ?: first
-            first to last
+    noteTarget?.let { post ->
+        NoteComposer(
+            post = post,
+            displayName = book?.title.orEmpty(),
+            coverPath = book?.coverPath,
+            hue = book?.hue ?: 210,
+            existing = ui.notes[post.id].orEmpty(),
+            onDismiss = { noteTarget = null },
+            onPost = { text ->
+                viewModel.addNote(post.id, text)
+                noteTarget = null
+            },
+        )
+    }
+
+    menuTarget?.let { post ->
+        val chapterOfPost = ui.chapters.firstOrNull { it.index == post.chapterIndex }
+        val alreadyStart = post.isChapterTitlePost || post.indexInChapter <= 1
+        PostActionsSheet(
+            post = post,
+            notes = ui.notes[post.id].orEmpty(),
+            chapterStart = alreadyStart,
+            canUnmark = alreadyStart && post.chapterIndex > 0 && chapterOfPost != null,
+            onMark = {
+                menuTarget = null
+                viewModel.markAsChapter(post)
+            },
+            onUnmark = {
+                menuTarget = null
+                chapterOfPost?.let { viewModel.unmarkChapter(it) }
+            },
+            onCopy = {
+                menuTarget = null
+                copyToClipboard(postText(post, book?.author.orEmpty(), book?.title.orEmpty()), "Post copied")
+            },
+            onNote = {
+                menuTarget = null
+                noteTarget = post
+            },
+            onDismiss = { menuTarget = null },
+        )
+    }
+}
+
+/**
+ * One chapter, one feed: the posts of the current chapter and a "go to next chapter"
+ * button where a timeline would offer a refresh.
+ */
+@Composable
+private fun ChapterFeed(
+    posts: List<FeedPost>,
+    notes: Map<String, List<com.epubfeed.domain.model.Note>>,
+    book: com.epubfeed.data.local.BookEntity,
+    displayName: String,
+    handle: String,
+    readingSize: androidx.compose.ui.unit.TextUnit,
+    readingFamily: androidx.compose.ui.text.font.FontFamily,
+    totalPosts: Int,
+    pinnedVisible: Boolean,
+    leading: Int,
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    chapterTitle: String,
+    chapterIndex: Int,
+    hasNextChapter: Boolean,
+    nextChapterTitle: String?,
+    scrollTarget: Int?,
+    onVisibleListIndex: (Int) -> Unit,
+    onConsumeScrollTarget: () -> Unit,
+    onInteraction: () -> Unit,
+    onLike: (FeedPost) -> Unit,
+    onBookmark: (FeedPost) -> Unit,
+    onNote: (FeedPost) -> Unit,
+    onShare: (FeedPost) -> Unit,
+    onCopy: (FeedPost) -> Unit,
+    onDeleteNote: (com.epubfeed.domain.model.Note) -> Unit,
+    onLongPress: (FeedPost) -> Unit,
+    onAvatarClick: () -> Unit,
+    onNextChapter: () -> Unit,
+    onAddBook: () -> Unit,
+) {
+    val x = LocalXColors.current
+
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = 96.dp),
+    ) {
+        if (pinnedVisible) {
+            item(key = "pinned-welcome") {
+                PinnedWelcomePost(
+                    displayName = displayName,
+                    handle = handle,
+                    coverPath = book.coverPath,
+                    hue = book.hue,
+                    onAddBook = onAddBook,
+                )
+                HorizontalDivider(color = x.divider, thickness = 1.dp)
+            }
         }
+        itemsIndexed(posts, key = { _, post -> post.id }) { index, post ->
+            val next = posts.getOrNull(index + 1)
+            val previous = posts.getOrNull(index - 1)
+            PostCard(
+                post = post,
+                displayName = displayName,
+                handle = handle,
+                coverPath = book.coverPath,
+                hue = book.hue,
+                showThreadLine = next != null,
+                showChapterDivider = previous != null,
+                readingFontSize = readingSize,
+                readingFontFamily = readingFamily,
+                viewsLabel = percentLabel(post.globalIndex, totalPosts),
+                notes = notes[post.id].orEmpty(),
+                onLike = { onLike(post) },
+                onBookmark = { onBookmark(post) },
+                onComment = { onNote(post) },
+                onShare = { onShare(post) },
+                onCopy = { onCopy(post) },
+                onDeleteNote = onDeleteNote,
+                onAvatarClick = onAvatarClick,
+                onLongPress = { onLongPress(post) },
+            )
+            HorizontalDivider(color = x.divider, thickness = 1.dp)
+        }
+        item(key = "chapter-footer-$chapterIndex") {
+            ChapterFooter(
+                chapterTitle = chapterTitle,
+                hasNextChapter = hasNextChapter,
+                nextChapterTitle = nextChapterTitle,
+                onNextChapter = onNextChapter,
+            )
+        }
+    }
+
+    // Report the top visible post, and treat scrolling as reading activity.
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.firstVisibleItemIndex to listState.isScrollInProgress }
             .distinctUntilChanged()
-            .collect { (first, last) ->
-                viewModel.onVisibleRange(first - leading, last - leading)
+            .collect { (index, scrolling) ->
+                if (scrolling) onInteraction()
+                onVisibleListIndex(index - leading)
             }
     }
 
-    // The window can be shorter than the viewport for short chapters: keep filling.
-    LaunchedEffect(ui.posts.size, ui.totalPosts, ui.windowStart) {
-        val loaded = ui.windowStart + ui.posts.size
-        if (ui.posts.isNotEmpty() && ui.posts.size < 24 && loaded < ui.totalPosts) {
-            delay(120)
-            viewModel.onVisibleRange(0, 1000)
+    // Put the reader back where they were: the target is a global post index.
+    LaunchedEffect(scrollTarget, posts.firstOrNull()?.id, posts.size, leading) {
+        val target = scrollTarget ?: return@LaunchedEffect
+        if (posts.isEmpty()) return@LaunchedEffect
+        val index = posts.indexOfFirst { it.globalIndex >= target }.let { if (it < 0) 0 else it }
+        // The first post of the sample book sits under the pinned welcome post: park on the
+        // welcome post there, and offset by it everywhere else.
+        val listIndex = if (index == 0) 0 else index + leading
+        listState.scrollToItem(listIndex)
+        withTimeoutOrNull(1_500) {
+            snapshotFlow { listState.firstVisibleItemIndex }.first { it >= listIndex }
         }
+        onConsumeScrollTarget()
     }
+}
 
-    // Restore / jump to the requested post once its window has arrived.
-    LaunchedEffect(ui.scrollTarget, ui.posts.size, leading, ui.windowStart) {
-        val target = ui.scrollTarget ?: return@LaunchedEffect
-        if (ui.posts.isEmpty()) return@LaunchedEffect
-        val itemCount = listState.layoutInfo.totalItemsCount
-        if (itemCount == 0) return@LaunchedEffect
-        // Target 0 (or the very first post of the window) means the top of the timeline,
-        // which is where the pinned welcome post lives for the sample book.
-        val index = if (target <= ui.windowStart) 0 else {
-            (target - ui.windowStart + leading).coerceIn(0, itemCount - 1)
+@Composable
+private fun CollectionPage(
+    liked: Boolean,
+    likedPosts: List<FeedPost>,
+    savedPosts: List<FeedPost>,
+    notes: Map<String, List<com.epubfeed.domain.model.Note>>,
+    book: com.epubfeed.data.local.BookEntity,
+    displayName: String,
+    handle: String,
+    readingSize: androidx.compose.ui.unit.TextUnit,
+    readingFamily: androidx.compose.ui.text.font.FontFamily,
+    totalPosts: Int,
+    onLike: (FeedPost) -> Unit,
+    onBookmark: (FeedPost) -> Unit,
+    onComment: (FeedPost) -> Unit,
+    onShare: (FeedPost) -> Unit,
+    onCopy: (FeedPost) -> Unit,
+    onDeleteNote: (com.epubfeed.domain.model.Note) -> Unit,
+    onAvatarClick: () -> Unit,
+    onLongPress: (FeedPost) -> Unit,
+    onOpen: (FeedPost) -> Unit,
+) {
+    if (liked) {
+        LikedTab(
+            posts = likedPosts,
+            notes = notes,
+            displayName = displayName,
+            handle = handle,
+            coverPath = book.coverPath,
+            hue = book.hue,
+            readingFontSize = readingSize,
+            readingFontFamily = readingFamily,
+            totalPosts = totalPosts,
+            onLike = onLike,
+            onBookmark = onBookmark,
+            onComment = onComment,
+            onShare = onShare,
+            onCopy = onCopy,
+            onDeleteNote = onDeleteNote,
+            onAvatarClick = onAvatarClick,
+            onLongPress = onLongPress,
+            onOpen = onOpen,
+        )
+    } else {
+        SavedTab(
+            posts = savedPosts,
+            notes = notes,
+            displayName = displayName,
+            handle = handle,
+            coverPath = book.coverPath,
+            hue = book.hue,
+            readingFontSize = readingSize,
+            readingFontFamily = readingFamily,
+            totalPosts = totalPosts,
+            onLike = onLike,
+            onBookmark = onBookmark,
+            onComment = onComment,
+            onShare = onShare,
+            onCopy = onCopy,
+            onDeleteNote = onDeleteNote,
+            onAvatarClick = onAvatarClick,
+            onLongPress = onLongPress,
+            onOpen = onOpen,
+        )
+    }
+}
+
+@Composable
+private fun ChapterFooter(
+    chapterTitle: String,
+    hasNextChapter: Boolean,
+    nextChapterTitle: String?,
+    onNextChapter: () -> Unit,
+) {
+    val x = LocalXColors.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        if (hasNextChapter) {
+            Text(
+                text = "You finished this chapter",
+                color = x.muted,
+                fontSize = 13.sp,
+            )
+            Spacer(Modifier.height(10.dp))
+            Box(
+                modifier = Modifier
+                    .clickable(onClick = onNextChapter)
+                    .background(x.accent, RoundedCornerShape(999.dp))
+                    .padding(horizontal = 26.dp, vertical = 13.dp),
+            ) {
+                Text(
+                    text = "Go to next chapter",
+                    color = Color.White,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            if (!nextChapterTitle.isNullOrBlank()) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = "Up next: $nextChapterTitle",
+                    color = x.muted,
+                    fontSize = 13.sp,
+                )
+            }
+        } else {
+            Text(
+                text = "That is the last chapter of the book.",
+                color = x.muted,
+                fontSize = 14.sp,
+            )
+            if (chapterTitle.isNotBlank()) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = chapterTitle,
+                    color = x.text,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
         }
-        listState.scrollToItem(index)
-        viewModel.consumeScrollTarget()
     }
 }
 
@@ -379,7 +663,7 @@ private fun EmptyLibraryState(onAddBook: () -> Unit) {
         Spacer(Modifier.height(20.dp))
         Box(
             modifier = Modifier
-                .background(x.accent, androidx.compose.foundation.shape.RoundedCornerShape(999.dp))
+                .background(x.accent, RoundedCornerShape(999.dp))
                 .clickable(onClick = onAddBook)
                 .padding(horizontal = 22.dp, vertical = 11.dp),
         ) {

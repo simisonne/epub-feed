@@ -21,7 +21,10 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -29,6 +32,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -49,6 +53,7 @@ import androidx.compose.ui.unit.sp
 import com.epubfeed.domain.model.Block
 import com.epubfeed.domain.model.BlockType
 import com.epubfeed.domain.model.FeedPost
+import com.epubfeed.domain.model.Note
 import com.epubfeed.ui.theme.LocalXColors
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
@@ -58,7 +63,8 @@ private val Gutter = 12.dp
 
 /**
  * One post in the timeline. Matches X's reply thread layout: avatar column on the
- * left (with the 2dp thread line), header, body and the action row underneath.
+ * left (with the 2dp thread line), header, body, the action row and any notes the
+ * reader wrote underneath.
  */
 @Composable
 fun PostCard(
@@ -72,10 +78,15 @@ fun PostCard(
     readingFontSize: TextUnit,
     readingFontFamily: FontFamily,
     viewsLabel: String,
+    notes: List<Note>,
     onLike: () -> Unit,
     onBookmark: () -> Unit,
+    onComment: () -> Unit,
     onShare: () -> Unit,
     onCopy: () -> Unit,
+    onDeleteNote: (Note) -> Unit,
+    onAvatarClick: () -> Unit,
+    onLongPress: () -> Unit,
     onOpen: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
@@ -96,7 +107,10 @@ fun PostCard(
                 .pointerInput(post.id, onOpen) {
                     detectTapGestures(
                         onTap = { onOpen?.invoke() },
-                        onLongPress = { onCopy() },
+                        onLongPress = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onLongPress()
+                        },
                     )
                 },
         ) {
@@ -112,7 +126,10 @@ fun PostCard(
                     title = displayName,
                     hue = hue,
                     size = AvatarSize,
-                    contentDescription = null,
+                    contentDescription = "Open the profile of $displayName",
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .clickable(onClick = onAvatarClick),
                 )
                 if (showThreadLine) {
                     Spacer(Modifier.height(4.dp))
@@ -146,7 +163,7 @@ fun PostCard(
                 )
                 Spacer(Modifier.height(8.dp))
                 ActionRow(
-                    replyCount = (post.indexInChapter + 1).toString(),
+                    noteCount = notes.size,
                     viewsLabel = viewsLabel,
                     liked = post.liked,
                     bookmarked = post.bookmarked,
@@ -159,11 +176,60 @@ fun PostCard(
                             likeScale.animateTo(1f, spring(dampingRatio = 0.35f, stiffness = 500f))
                         }
                     },
+                    onComment = onComment,
                     onBookmark = onBookmark,
                     onShare = onShare,
                 )
+                if (notes.isNotEmpty()) {
+                    Spacer(Modifier.height(2.dp))
+                    notes.forEach { note ->
+                        NoteBubble(note = note, onDelete = { onDeleteNote(note) })
+                    }
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun NoteBubble(note: Note, onDelete: () -> Unit) {
+    val x = LocalXColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(x.elevated)
+            .padding(start = 10.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(22.dp)
+                .clip(CircleShape)
+                .background(x.accent),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("Y", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("You", color = x.text, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text(" · ${relativeTime(note.createdAt)}", color = x.muted, fontSize = 12.sp)
+            }
+            Spacer(Modifier.height(1.dp))
+            Text(note.text, color = x.text, fontSize = 14.sp, lineHeight = 19.sp)
+        }
+        Icon(
+            imageVector = Icons.Filled.Close,
+            contentDescription = "Delete note",
+            tint = x.muted,
+            modifier = Modifier
+                .size(26.dp)
+                .clip(CircleShape)
+                .clickable(onClick = onDelete)
+                .padding(5.dp),
+        )
     }
 }
 
@@ -278,12 +344,13 @@ private fun Block.annotated(): AnnotatedString = buildAnnotatedString {
 
 @Composable
 private fun ActionRow(
-    replyCount: String,
+    noteCount: Int,
     viewsLabel: String,
     liked: Boolean,
     bookmarked: Boolean,
     likeScale: () -> Float,
     onLike: () -> Unit,
+    onComment: () -> Unit,
     onBookmark: () -> Unit,
     onShare: () -> Unit,
 ) {
@@ -294,17 +361,20 @@ private fun ActionRow(
     ) {
         ActionCell(
             icon = FeedIcons.Reply,
-            label = replyCount,
-            contentDescription = "Replies, post $replyCount in chapter",
-            tint = x.muted,
-            onClick = {},
+            label = noteCount.takeIf { it > 0 }?.toString(),
+            contentDescription = when (noteCount) {
+                0 -> "Add a note"
+                1 -> "1 note, add a note"
+                else -> "$noteCount notes, add a note"
+            },
+            tint = if (noteCount > 0) x.accent else x.muted,
+            onClick = onComment,
         )
         ActionCell(
             icon = FeedIcons.Repost,
             label = null,
             contentDescription = "Repost",
             tint = x.muted,
-            onClick = {},
         )
         ActionCell(
             icon = if (liked) FeedIcons.LikeFilled else FeedIcons.LikeOutline,
@@ -322,7 +392,6 @@ private fun ActionRow(
             label = viewsLabel,
             contentDescription = "Views, $viewsLabel of the book read",
             tint = x.muted,
-            onClick = {},
         )
         ActionCell(
             icon = if (bookmarked) FeedIcons.BookmarkFilled else FeedIcons.BookmarkOutline,
@@ -337,28 +406,31 @@ private fun ActionRow(
             contentDescription = "Share post",
             tint = x.muted,
             onClick = onShare,
-            alignEnd = true,
         )
     }
 }
 
+/**
+ * One action in the row. Every cell takes an equal share of the width and centres its
+ * content, so the tap target lines up with the icon the reader sees: the boundary between
+ * two actions sits on the midpoint between the two icons.
+ */
 @Composable
 private fun RowScope.ActionCell(
     icon: ImageVector,
     label: String?,
     contentDescription: String,
     tint: Color,
-    onClick: () -> Unit,
+    onClick: (() -> Unit)? = null,
     iconModifier: Modifier = Modifier,
-    alignEnd: Boolean = false,
 ) {
     Row(
         modifier = Modifier
             .weight(1f)
             .heightIn(min = 48.dp)
-            .clickable(onClick = onClick),
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = if (alignEnd) Arrangement.End else Arrangement.Start,
+        horizontalArrangement = Arrangement.Center,
     ) {
         Icon(
             imageVector = icon,
@@ -377,5 +449,17 @@ private fun RowScope.ActionCell(
                 maxLines = 1,
             )
         }
+    }
+}
+
+/** "just now", "4m", "2h", "3d" — the way a timeline stamps a reply. */
+fun relativeTime(createdAt: Long, now: Long = System.currentTimeMillis()): String {
+    val seconds = ((now - createdAt) / 1000).coerceAtLeast(0)
+    return when {
+        seconds < 60 -> "${seconds}s"
+        seconds < 3_600 -> "${seconds / 60}m"
+        seconds < 86_400 -> "${seconds / 3_600}h"
+        seconds < 604_800 -> "${seconds / 86_400}d"
+        else -> "${seconds / 604_800}w"
     }
 }

@@ -63,6 +63,9 @@ object EpubParser {
 
             val title = metadata(opf, "title").ifBlank { file.nameWithoutExtension }
             val author = metadata(opf, "creator").ifBlank { "Unknown author" }
+            val publisher = metadata(opf, "publisher").takeIf { it.isNotBlank() }
+            val publishedYear = metadata(opf, "date")
+                .let { Regex("\\d{4}").find(it)?.value }
 
             val manifest = LinkedHashMap<String, ManifestItem>()
             opf.getElementsByTag("item").forEach { item ->
@@ -117,6 +120,8 @@ object EpubParser {
                 author = tidyTitle(author),
                 chapters = chapters,
                 coverBytes = cover,
+                publisher = publisher,
+                publishedYear = publishedYear,
             )
         }
     }

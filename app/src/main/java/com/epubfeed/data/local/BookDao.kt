@@ -30,9 +30,18 @@ interface BookDao {
     @Query("DELETE FROM books WHERE id = :id")
     suspend fun delete(id: String)
 
+    @Query("UPDATE books SET wordCount = :words WHERE id = :id")
+    suspend fun updateWordCount(id: String, words: Int)
+
     @Query("UPDATE books SET lastPostIndex = :index WHERE id = :id")
     suspend fun updateLastPostIndex(id: String, index: Int)
 
     @Query("UPDATE books SET postCount = :posts, chapterCount = :chapters WHERE id = :id")
     suspend fun updateCounts(id: String, posts: Int, chapters: Int)
+
+    @Query(
+        "UPDATE books SET postCount = :posts, chapterCount = :chapters, wordCount = :words, " +
+            "lastPostIndex = :position WHERE id = :id",
+    )
+    suspend fun updateStructure(id: String, posts: Int, chapters: Int, words: Int, position: Int)
 }

@@ -26,3 +26,12 @@ data class ChapterSummary(
     val firstIndex: Int,
     val lastIndex: Int,
 )
+
+/** A note the reader wrote under a post. */
+@Immutable
+data class Note(
+    val id: String,
+    val postId: String,
+    val text: String,
+    val createdAt: Long,
+)

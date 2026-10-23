@@ -5,8 +5,10 @@ import androidx.room.Room
 import com.epubfeed.data.local.AppDatabase
 import com.epubfeed.data.local.BookDao
 import com.epubfeed.data.local.ChapterDao
+import com.epubfeed.data.local.NoteDao
 import com.epubfeed.data.local.PostDao
 import com.epubfeed.data.local.ReactionDao
+import com.epubfeed.data.local.StatsDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -23,6 +25,7 @@ object AppModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, "epub-feed.db")
+            .addMigrations(AppDatabase.MIGRATION_1_2)
             .fallbackToDestructiveMigration(dropAllTables = true)
             .build()
 
@@ -37,6 +40,12 @@ object AppModule {
 
     @Provides
     fun provideReactionDao(db: AppDatabase): ReactionDao = db.reactionDao()
+
+    @Provides
+    fun provideNoteDao(db: AppDatabase): NoteDao = db.noteDao()
+
+    @Provides
+    fun provideStatsDao(db: AppDatabase): StatsDao = db.statsDao()
 
     @Provides
     @Singleton

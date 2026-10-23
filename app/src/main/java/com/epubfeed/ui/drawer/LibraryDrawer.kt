@@ -1,6 +1,7 @@
 package com.epubfeed.ui.drawer
 
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -40,6 +41,15 @@ import com.epubfeed.ui.theme.LocalXColors
  * Slide out library drawer. Same gesture and placement as the X account drawer, but
  * it lists imported books instead of menu entries.
  */
+/** The installed version, read from the package so it can never drift from the build. */
+@Composable
+private fun appVersion(): String = run {
+    val context = LocalContext.current
+    runCatching {
+        context.packageManager.getPackageInfo(context.packageName, 0).versionName
+    }.getOrNull() ?: "1.0"
+}
+
 @Composable
 fun LibraryDrawer(
     books: List<BookEntity>,
@@ -148,7 +158,7 @@ fun LibraryDrawer(
             HorizontalDivider(color = x.divider, thickness = 1.dp)
             Spacer(Modifier.height(12.dp))
             Text(
-                text = "Offline only. Nothing leaves this device.",
+                text = "ePUB Feed ${appVersion()}",
                 color = x.muted,
                 fontSize = 12.sp,
             )

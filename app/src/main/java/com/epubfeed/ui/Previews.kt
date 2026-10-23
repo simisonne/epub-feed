@@ -11,6 +11,7 @@ import com.epubfeed.domain.model.Block
 import com.epubfeed.domain.model.BlockType
 import com.epubfeed.domain.model.ChapterSummary
 import com.epubfeed.domain.model.FeedPost
+import com.epubfeed.domain.model.Note
 import com.epubfeed.domain.model.ReadingFont
 import com.epubfeed.domain.model.Run
 import com.epubfeed.domain.model.ThemeMode
@@ -71,10 +72,15 @@ private fun PostLightsOutPreview() {
                 readingFontSize = 17.sp,
                 readingFontFamily = readingFontFamily(ReadingFont.SANS),
                 viewsLabel = "8%",
+                notes = emptyList(),
                 onLike = {},
                 onBookmark = {},
+                onComment = {},
                 onShare = {},
                 onCopy = {},
+                onDeleteNote = {},
+                onAvatarClick = {},
+                onLongPress = {},
             )
         }
     }
@@ -126,10 +132,15 @@ private fun PostLightPreview() {
                 readingFontSize = 20.sp,
                 readingFontFamily = readingFontFamily(ReadingFont.SERIF),
                 viewsLabel = "12%",
+                notes = listOf(Note("n1", samplePost.id, "This is exactly how it feels.", System.currentTimeMillis() - 240_000)),
                 onLike = {},
                 onBookmark = {},
+                onComment = {},
                 onShare = {},
                 onCopy = {},
+                onDeleteNote = {},
+                onAvatarClick = {},
+                onLongPress = {},
             )
         }
     }

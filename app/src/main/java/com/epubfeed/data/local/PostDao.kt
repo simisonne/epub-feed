@@ -31,12 +31,15 @@ interface PostDao {
     @Query("DELETE FROM posts WHERE bookId = :bookId")
     suspend fun deleteForBook(bookId: String)
 
-    /** Windowed feed query: only the posts around the viewport ever reach the UI. */
-    @Query("$POST_SELECT WHERE p.bookId = :bookId AND p.globalIndex >= :start AND p.globalIndex < :end ORDER BY p.globalIndex")
-    fun observeWindow(bookId: String, start: Int, end: Int): Flow<List<PostRow>>
+    /** The whole chapter, in order: one chapter is one feed. */
+    @Query("$POST_SELECT WHERE p.bookId = :bookId AND p.chapterIndex = :chapterIndex ORDER BY p.indexInChapter")
+    fun observeChapter(bookId: String, chapterIndex: Int): Flow<List<PostRow>>
 
     @Query("$POST_SELECT WHERE p.bookId = :bookId AND r.bookmarked = 1 ORDER BY p.globalIndex")
     fun observeSaved(bookId: String): Flow<List<PostRow>>
+
+    @Query("$POST_SELECT WHERE p.bookId = :bookId AND r.liked = 1 ORDER BY p.globalIndex")
+    fun observeLiked(bookId: String): Flow<List<PostRow>>
 
     @Query("SELECT * FROM posts WHERE id = :id")
     suspend fun get(id: String): PostEntity?

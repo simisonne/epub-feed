@@ -22,6 +22,11 @@ data class BookEntity(
     val isSample: Boolean,
     val postCount: Int,
     val chapterCount: Int,
+    /** From the EPUB package metadata, when present. */
+    val publisher: String? = null,
+    val publishedYear: String? = null,
+    /** Total words in the book, used for the reading time and page estimates. */
+    val wordCount: Int = 0,
 )
 
 @Entity(
@@ -99,4 +104,32 @@ data class ReactionEntity(
     val liked: Boolean,
     val bookmarked: Boolean,
     val updatedAt: Long,
+)
+
+/** A note the reader wrote under a post, the feed's version of a reply. */
+@Entity(
+    tableName = "notes",
+    foreignKeys = [
+        ForeignKey(
+            entity = PostEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["postId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index("bookId"), Index("postId")],
+)
+data class NoteEntity(
+    @PrimaryKey val id: String,
+    val postId: String,
+    val bookId: String,
+    val text: String,
+    val createdAt: Long,
+)
+
+/** Time actually spent reading a book, accumulated with an idle timeout. */
+@Entity(tableName = "book_stats")
+data class BookStatsEntity(
+    @PrimaryKey val bookId: String,
+    val secondsRead: Long,
 )

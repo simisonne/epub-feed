@@ -85,7 +85,7 @@ fun SettingsSheet(
                 onSelect = actions.setTextSize,
             )
 
-            SettingsRow(title = "Font", description = "Serif reads like print, sans reads like the timeline.") {
+            SettingsRow(title = "Font") {
                 SegmentedOptions(
                     options = ReadingFont.entries.toList(),
                     selected = settings.readingFont,
@@ -109,14 +109,6 @@ fun SettingsSheet(
                 },
                 onSelect = actions.setPostLength,
             )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = "Shorter posts mean more posts per chapter. Your place in the book and your likes are kept.",
-                color = x.muted,
-                fontSize = 13.sp,
-                lineHeight = 18.sp,
-            )
-
             SectionDivider()
 
             SettingsSectionLabel("Theme")

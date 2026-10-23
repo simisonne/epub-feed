@@ -1,17 +1,21 @@
 package com.epubfeed.ui.feed
 
+import android.os.SystemClock
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.epubfeed.data.local.BookEntity
+import com.epubfeed.data.local.NoteEntity
 import com.epubfeed.data.prefs.SettingsRepository
 import com.epubfeed.data.repo.BookRepository
 import com.epubfeed.data.repo.SampleBooks
 import com.epubfeed.domain.model.ChapterSummary
 import com.epubfeed.domain.model.FeedPost
+import com.epubfeed.domain.model.Note
 import com.epubfeed.domain.model.PostLength
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -31,25 +35,34 @@ data class FeedUiState(
     val books: List<BookEntity> = emptyList(),
     val book: BookEntity? = null,
     val posts: List<FeedPost> = emptyList(),
-    val windowStart: Int = 0,
+    val notes: Map<String, List<Note>> = emptyMap(),
     val chapters: List<ChapterSummary> = emptyList(),
+    val chapterIndex: Int = 0,
+    val chapterTitle: String = "",
+    val hasNextChapter: Boolean = false,
+    val likedPosts: List<FeedPost> = emptyList(),
     val savedPosts: List<FeedPost> = emptyList(),
     val totalPosts: Int = 0,
+    /** Global index of the post the reader is on right now. */
+    val currentIndex: Int = 0,
     val scrollTarget: Int? = null,
     val busyMessage: String? = null,
 )
 
 private data class Core(
     val book: BookEntity?,
-    val posts: List<FeedPost>,
+    val chapterPosts: List<FeedPost>,
     val chapters: List<ChapterSummary>,
+    val liked: List<FeedPost>,
     val saved: List<FeedPost>,
+    val notes: Map<String, List<Note>>,
 )
 
 private data class Part(
-    val window: IntRange,
+    val chapterIndex: Int,
     val scrollTarget: Int?,
     val loading: Boolean,
+    val currentIndex: Int,
     val busy: String?,
 )
 
@@ -65,56 +78,82 @@ class FeedViewModel @Inject constructor(
     private val routeBookId: String? = savedStateHandle.get<String>("bookId")
 
     private val activeBookId = MutableStateFlow<String?>(routeBookId)
-    private val window = MutableStateFlow(0 until 0)
+    private val chapterIndex = MutableStateFlow(0)
     private val scrollTarget = MutableStateFlow<Int?>(null)
     private val loading = MutableStateFlow(true)
     private val busy = MutableStateFlow<String?>(null)
+    private val currentIndex = MutableStateFlow(0)
 
     private var restoredFor: String? = null
-    private var totalPostsValue: Int = 0
-    private var lastVisibleIndex: Int = 0
+    private var lastVisibleIndex = 0
 
     private val bookFlow = activeBookId.flatMapLatest { id ->
         if (id == null) flowOf(null) else repository.observeBook(id)
     }
 
-    private val postsFlow = combine(activeBookId, window) { id, range -> id to range }
-        .flatMapLatest { (id, range) ->
-            if (id == null || range.first >= range.last) {
-                flowOf(emptyList())
-            } else {
-                repository.observePosts(id, range.first, range.last)
-            }
+    private val postsFlow = combine(activeBookId, chapterIndex) { id, index -> id to index }
+        .flatMapLatest { (id, index) ->
+            if (id == null) flowOf(emptyList()) else repository.observeChapterPosts(id, index)
         }
 
     private val chaptersFlow = activeBookId.flatMapLatest { id ->
         if (id == null) flowOf(emptyList()) else repository.observeChapters(id)
     }
 
+    private val likedFlow = activeBookId.flatMapLatest { id ->
+        if (id == null) flowOf(emptyList()) else repository.observeLiked(id)
+    }
+
     private val savedFlow = activeBookId.flatMapLatest { id ->
         if (id == null) flowOf(emptyList()) else repository.observeSaved(id)
     }
 
-    private val coreFlow = combine(bookFlow, postsFlow, chaptersFlow, savedFlow) { book, posts, chapters, saved ->
-        Core(book, posts, chapters, saved)
+    private val notesFlow = activeBookId.flatMapLatest { id ->
+        if (id == null) flowOf(emptyList()) else repository.observeNotes(id)
     }
 
-    private val partFlow = combine(window, scrollTarget, loading, busy) { w, target, isLoading, busyMessage ->
-        Part(w, target, isLoading, busyMessage)
+    private val coreFlow = combine(
+        combine(bookFlow, postsFlow, chaptersFlow) { book, posts, chapters -> Triple(book, posts, chapters) },
+        combine(likedFlow, savedFlow, notesFlow) { liked, saved, notes ->
+            Triple(
+                liked,
+                saved,
+                notes.groupBy { it.postId }
+                    .mapValues { (_, list) -> list.map { Note(it.id, it.postId, it.text, it.createdAt) } },
+            )
+        },
+    ) { head, tail ->
+        Core(
+            book = head.first,
+            chapterPosts = head.second,
+            chapters = head.third,
+            liked = tail.first,
+            saved = tail.second,
+            notes = tail.third,
+        )
+    }
+
+    private val partFlow = combine(chapterIndex, scrollTarget, loading, currentIndex, busy) { index, target, isLoading, current, busyMessage ->
+        Part(index, target, isLoading, current, busyMessage)
     }
 
     val uiState: StateFlow<FeedUiState> =
         combine(coreFlow, partFlow, repository.observeBooks()) { core, part, books ->
-            totalPostsValue = core.book?.postCount ?: 0
+            val chapter = core.chapters.getOrNull(part.chapterIndex)
             FeedUiState(
                 loading = part.loading,
                 books = books,
                 book = core.book,
-                posts = core.posts,
-                windowStart = part.window.first,
+                posts = core.chapterPosts,
+                notes = core.notes,
                 chapters = core.chapters,
+                chapterIndex = part.chapterIndex,
+                chapterTitle = chapter?.title.orEmpty(),
+                hasNextChapter = part.chapterIndex < core.chapters.size - 1,
+                likedPosts = core.liked,
                 savedPosts = core.saved,
-                totalPosts = totalPostsValue,
+                totalPosts = core.book?.postCount ?: 0,
+                currentIndex = part.currentIndex,
                 scrollTarget = part.scrollTarget,
                 busyMessage = part.busy,
             )
@@ -129,17 +168,23 @@ class FeedViewModel @Inject constructor(
             loading.value = false
         }
 
-        // Restore the saved reading position once per opened book.
+        // Open the chapter the reader left off in, once per book.
         viewModelScope.launch {
             bookFlow.filterNotNull().collect { book ->
                 if (restoredFor != book.id) {
                     restoredFor = book.id
-                    applyWindowAround(book.lastPostIndex, book.postCount)
+                    val chapters = repository.observeChapters(book.id).first()
+                    val index = chapters.indexOfLast { it.firstIndex <= book.lastPostIndex }
+                        .coerceAtLeast(0)
+                    currentIndex.value = book.lastPostIndex
+                    lastVisibleIndex = book.lastPostIndex
+                    chapterIndex.value = index
+                    scrollTarget.value = book.lastPostIndex
                 }
             }
         }
 
-        // Changing the post length regenerates the current book and keeps the place.
+        // Changing the post length regenerates the book and keeps the place.
         viewModelScope.launch {
             var previous: PostLength? = null
             settingsRepository.settings.map { it.postLength }.distinctUntilChanged().collect { length ->
@@ -149,11 +194,17 @@ class FeedViewModel @Inject constructor(
                 if (before == null || before == length) return@collect
                 busy.value = "Rebuilding posts"
                 runCatching { repository.setPostLength(id, length) }
-                    .onSuccess { position ->
-                        val total = repository.getBook(id)?.postCount ?: 0
-                        applyWindowAround(position, total)
-                    }
+                    .onSuccess { position -> jumpToPosition(id, position) }
                 busy.value = null
+            }
+        }
+
+        // Reading clock: 5s ticks, credited only while the reader is active.
+        viewModelScope.launch {
+            while (true) {
+                delay(TICK_MS)
+                accrueReadingTime()
+                flushReadingTime()
             }
         }
     }
@@ -167,39 +218,62 @@ class FeedViewModel @Inject constructor(
         return repository.observeBooks().first().firstOrNull()?.id
     }
 
-    private fun applyWindowAround(position: Int, total: Int) {
-        val maxIndex = (total - 1).coerceAtLeast(0)
-        val clamped = position.coerceIn(0, maxIndex)
-        window.value = (clamped - 40).coerceAtLeast(0) until (clamped + 260)
-        scrollTarget.value = clamped
+    /** Points the feed at the chapter that contains [position] and asks for a scroll there. */
+    private suspend fun jumpToPosition(bookId: String, position: Int) {
+        val chapters = repository.observeChapters(bookId).first()
+        if (chapters.isEmpty()) {
+            scrollTarget.value = position
+            return
+        }
+        val index = chapters.indexOfLast { it.firstIndex <= position }.coerceAtLeast(0)
+        currentIndex.value = position
+        lastVisibleIndex = position
+        chapterIndex.value = index
+        scrollTarget.value = position
     }
 
-    /** Maps the visible list window onto absolute post indices and grows the window at the edges. */
-    fun onVisibleRange(firstListIndex: Int, lastListIndex: Int) {
-        val range = window.value
-        val total = totalPostsValue
-        if (total <= 0 || range.first >= range.last) return
-        val size = range.last - range.first
-        val first = (range.first + firstListIndex).coerceIn(0, total - 1)
-        lastVisibleIndex = first
-        activeBookId.value?.let { id -> repository.saveReadingPositionAsync(id, first) }
+    /** The list index of the top visible post inside the current chapter. */
+    fun onVisibleListIndex(listIndex: Int) {
+        if (scrollTarget.value != null) return
+        val post = uiState.value.posts.getOrNull(listIndex) ?: return
+        lastVisibleIndex = post.globalIndex
+        currentIndex.value = post.globalIndex
+        activeBookId.value?.let { id -> repository.saveReadingPositionAsync(id, post.globalIndex) }
+    }
 
-        // Prefetch well before the edge so the next query lands while the fling is
-        // still mid screen rather than exactly when the list runs out of items.
-        when {
-            firstListIndex < PREFETCH_DISTANCE && range.first > 0 ->
-                window.value = (range.first - WINDOW_CHUNK).coerceAtLeast(0) until range.last
-            lastListIndex > size - PREFETCH_DISTANCE && range.last < total ->
-                window.value = range.first until (range.last + WINDOW_CHUNK).coerceAtMost(total)
-        }
+    /** Jumps to any post in the book, opening the chapter that contains it. */
+    fun openPost(globalIndex: Int) {
+        viewModelScope.launch { jumpToPosition(activeBookId.value ?: return@launch, globalIndex) }
     }
 
     fun consumeScrollTarget() {
         scrollTarget.value = null
     }
 
-    fun jumpTo(globalIndex: Int) {
-        applyWindowAround(globalIndex, totalPostsValue)
+    /** Jumps to a chapter, optionally at a specific global post index. */
+    fun openChapter(index: Int, position: Int? = null) {
+        val chapters = uiState.value.chapters
+        val target = position ?: chapters.getOrNull(index)?.firstIndex ?: return
+        viewModelScope.launch {
+            chapterIndex.value = index.coerceAtLeast(0)
+            currentIndex.value = target
+            lastVisibleIndex = target
+            scrollTarget.value = target
+        }
+    }
+
+    fun nextChapter() {
+        val ui = uiState.value
+        if (!ui.hasNextChapter) return
+        openChapter(ui.chapterIndex + 1)
+    }
+
+    fun addNote(postId: String, text: String) {
+        viewModelScope.launch { repository.addNote(postId, text) }
+    }
+
+    fun deleteNote(noteId: String) {
+        viewModelScope.launch { repository.deleteNote(noteId) }
     }
 
     fun toggleLike(post: FeedPost) {
@@ -208,6 +282,31 @@ class FeedViewModel @Inject constructor(
 
     fun toggleBookmark(post: FeedPost) {
         viewModelScope.launch { repository.toggleBookmark(post.id) }
+    }
+
+    /**
+     * Marks a post as the start of a new chapter. The whole book is re-sliced, so the feed
+     * reloads with that post at the top of the new chapter.
+     */
+    fun markAsChapter(post: FeedPost) {
+        val id = activeBookId.value ?: return
+        viewModelScope.launch {
+            busy.value = "Splitting chapter"
+            val position = runCatching { repository.markAsChapter(id, post.globalIndex) }.getOrDefault(-1)
+            if (position >= 0) jumpToPosition(id, position)
+            busy.value = null
+        }
+    }
+
+    /** Folds the chapter back into the previous one, parking the feed where it used to start. */
+    fun unmarkChapter(chapter: ChapterSummary) {
+        val id = activeBookId.value ?: return
+        viewModelScope.launch {
+            busy.value = "Merging chapter"
+            val position = runCatching { repository.unmarkChapter(id, chapter.index) }.getOrDefault(-1)
+            if (position >= 0) jumpToPosition(id, position)
+            busy.value = null
+        }
     }
 
     fun deleteBook(book: BookEntity) {
@@ -219,6 +318,8 @@ class FeedViewModel @Inject constructor(
                 activeBookId.value = next?.id
                 settingsRepository.setLastBookId(next?.id)
                 restoredFor = null
+                currentIndex.value = 0
+                chapterIndex.value = 0
             }
         }
     }
@@ -226,6 +327,9 @@ class FeedViewModel @Inject constructor(
     fun switchToBook(book: BookEntity) {
         if (activeBookId.value == book.id) return
         restoredFor = null
+        currentIndex.value = 0
+        chapterIndex.value = 0
+        scrollTarget.value = 0
         activeBookId.value = book.id
         viewModelScope.launch { settingsRepository.setLastBookId(book.id) }
     }
@@ -233,10 +337,66 @@ class FeedViewModel @Inject constructor(
     fun savePositionNow() {
         val id = activeBookId.value ?: return
         repository.saveReadingPositionNow(id, lastVisibleIndex)
+        flushReadingTime(force = true)
+    }
+
+    // ---------------------------------------------------------------- reading clock
+
+    private var screenActive = false
+    private var lastInteraction = 0L
+    private var creditedUpTo = 0L
+    private var pendingReadMillis = 0L
+    private var lastFlushAt = 0L
+
+    fun onScreenResumed() {
+        val now = SystemClock.elapsedRealtime()
+        screenActive = true
+        lastInteraction = now
+        creditedUpTo = now
+        lastFlushAt = now
+    }
+
+    fun onScreenPaused() {
+        accrueReadingTime()
+        screenActive = false
+        flushReadingTime(force = true)
+    }
+
+    /** Any scroll or tap counts as the reader being present. */
+    fun onReadingInteraction() {
+        if (!screenActive) return
+        accrueReadingTime()
+        lastInteraction = SystemClock.elapsedRealtime()
+        if (creditedUpTo < lastInteraction) creditedUpTo = lastInteraction
+    }
+
+    private fun accrueReadingTime() {
+        if (!screenActive) return
+        val now = SystemClock.elapsedRealtime()
+        // Time is credited until the idle deadline: an AFK reader stops the clock after
+        // [IDLE_TIMEOUT_MS] of no interaction, and the gap is skipped when they come back.
+        val end = minOf(now, lastInteraction + IDLE_TIMEOUT_MS)
+        if (end > creditedUpTo) {
+            pendingReadMillis += end - creditedUpTo
+            creditedUpTo = end
+        }
+    }
+
+    private fun flushReadingTime(force: Boolean = false) {
+        val id = activeBookId.value ?: return
+        val seconds = pendingReadMillis / 1000
+        if (seconds <= 0) return
+        val now = SystemClock.elapsedRealtime()
+        if (!force && now - lastFlushAt < FLUSH_MS) return
+        pendingReadMillis -= seconds * 1000
+        lastFlushAt = now
+        viewModelScope.launch { repository.addReadingSeconds(id, seconds) }
     }
 
     private companion object {
-        const val WINDOW_CHUNK = 300
-        const val PREFETCH_DISTANCE = 80
+        const val NOTE_LIMIT = 280
+        const val IDLE_TIMEOUT_MS = 120_000L
+        const val TICK_MS = 5_000L
+        const val FLUSH_MS = 15_000L
     }
 }

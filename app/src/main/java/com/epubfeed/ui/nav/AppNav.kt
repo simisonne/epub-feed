@@ -20,6 +20,7 @@ import androidx.navigation.navArgument
 import com.epubfeed.data.repo.ImportState
 import com.epubfeed.ui.feed.FeedScreen
 import com.epubfeed.ui.import.ImportOverlay
+import com.epubfeed.ui.profile.ProfileScreen
 import com.epubfeed.ui.settings.AppSettingsViewModel
 import com.epubfeed.ui.settings.SettingsActions
 import com.epubfeed.ui.theme.EpubFeedTheme
@@ -27,7 +28,7 @@ import com.epubfeed.ui.theme.LocalXColors
 
 /**
  * Single activity, one nav graph. "home" resolves the last opened book, "book/{bookId}"
- * opens a specific one (used after an import).
+ * opens a specific one (used after an import), "profile/{bookId}" is the book's own page.
  */
 @Composable
 fun AppNav(
@@ -64,6 +65,7 @@ fun AppNav(
                         settings = settings,
                         settingsActions = actions,
                         onImportUri = onImportUri,
+                        onOpenProfile = { id -> navController.navigate("profile/$id") },
                     )
                 }
                 composable(
@@ -75,6 +77,19 @@ fun AppNav(
                         settings = settings,
                         settingsActions = actions,
                         onImportUri = onImportUri,
+                        onOpenProfile = { id -> navController.navigate("profile/$id") },
+                    )
+                }
+                composable(
+                    route = ProfileRoute,
+                    arguments = listOf(navArgument("bookId") { type = NavType.StringType }),
+                ) {
+                    ProfileScreen(
+                        onBack = { navController.popBackStack() },
+                        onContinueReading = { id ->
+                            navController.popBackStack()
+                            navController.navigateToBook(id)
+                        },
                     )
                 }
             }
@@ -85,6 +100,7 @@ fun AppNav(
 
 private const val HomeRoute = "home"
 private const val BookRoute = "book/{bookId}"
+private const val ProfileRoute = "profile/{bookId}"
 
 private fun NavHostController.navigateToBook(bookId: String) {
     navigate("book/$bookId") {

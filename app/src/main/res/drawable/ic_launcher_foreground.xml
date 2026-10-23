@@ -4,14 +4,19 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Three stacked "post" cards: a feed made of book pages. -->
-    <path
-        android:fillColor="#1D9BF0"
-        android:pathData="M34,30h40a4,4 0 0 1 4,4v4a4,4 0 0 1 -4,4h-40a4,4 0 0 1 -4,-4v-4a4,4 0 0 1 4,-4z" />
-    <path
-        android:fillColor="#E7E9EA"
-        android:pathData="M34,46h40a3,3 0 0 1 3,3v3a3,3 0 0 1 -3,3h-40a3,3 0 0 1 -3,-3v-3a3,3 0 0 1 3,-3z" />
-    <path
-        android:fillColor="#E7E9EA"
-        android:pathData="M34,60h26a3,3 0 0 1 3,3v3a3,3 0 0 1 -3,3h-26a3,3 0 0 1 -3,-3v-3a3,3 0 0 1 3,-3z" />
+    <!-- Three stacked "post" cards: a feed made of book pages.
+         The launcher masks only the centre 72dp of the 108dp layer, so the stack is
+         centred on (54,54): translateY puts the 39dp tall art (y 30..69) dead centre
+         and keeps its corners inside the 66dp safe circle. -->
+    <group android:translateY="4.5">
+        <path
+            android:fillColor="#1D9BF0"
+            android:pathData="M34,30h40a4,4 0 0 1 4,4v4a4,4 0 0 1 -4,4h-40a4,4 0 0 1 -4,-4v-4a4,4 0 0 1 4,-4z" />
+        <path
+            android:fillColor="#E7E9EA"
+            android:pathData="M34,46h40a3,3 0 0 1 3,3v3a3,3 0 0 1 -3,3h-40a3,3 0 0 1 -3,-3v-3a3,3 0 0 1 3,-3z" />
+        <path
+            android:fillColor="#E7E9EA"
+            android:pathData="M34,60h26a3,3 0 0 1 3,3v3a3,3 0 0 1 -3,3h-26a3,3 0 0 1 -3,-3v-3a3,3 0 0 1 3,-3z" />
+    </group>
 </vector>
