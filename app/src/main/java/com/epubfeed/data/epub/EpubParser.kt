@@ -1,6 +1,8 @@
 package com.epubfeed.data.epub
 
+import com.epubfeed.data.image.PictureFilter
 import com.epubfeed.domain.model.Block
+import com.epubfeed.domain.model.BlockType
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
@@ -23,6 +25,14 @@ object EpubParser {
     private const val MAX_TOTAL_UNCOMPRESSED = 300L * 1024 * 1024
     private const val MAX_DOCUMENT_BYTES = 24L * 1024L * 1024L
     private const val MAX_COVER_BYTES = 8L * 1024L * 1024L
+    private const val MAX_ILLUSTRATION_BYTES = 16L * 1024L * 1024L
+    private const val MAX_TOTAL_ILLUSTRATION_BYTES = 96L * 1024L * 1024L
+
+    /** Enough of an image file to read its size out of the header. */
+    private const val MAX_HEADER_BYTES = 64 * 1024
+
+    /** Only formats Android can draw. SVG needs a renderer the app does not ship. */
+    private val RASTER_EXTENSIONS = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp")
 
     fun parse(file: File): ParsedBook {
         if (!file.exists() || file.length() == 0L) {
@@ -88,6 +98,10 @@ object EpubParser {
             if (spine.isEmpty()) throw BookParseException("This EPUB has no readable chapters.")
 
             val chapters = mutableListOf<ParsedChapter>()
+            // Pictures that arrive before the first text chapter (a frontispiece, or a book that
+            // opens with a plate) are held back and attached to the opener instead of becoming a
+            // chapter of their own.
+            var leadingImages = mutableListOf<Block>()
             var visited = 0
             for (item in spine) {
                 if (item.mediaType !in HTML_TYPES) continue
@@ -95,23 +109,57 @@ object EpubParser {
                 val entry = zf.getEntry(item.href) ?: continue
                 val html = readText(zf, entry, MAX_DOCUMENT_BYTES.toLong())
                 val doc = Jsoup.parse(html, "")
-                val (blocks, heading) = HtmlBlocks.extract(doc)
+                val docDir = item.href.substringBeforeLast('/', "")
+                val (blocks, heading) = HtmlBlocks.extract(doc) { src ->
+                    val trimmed = src.trim()
+                    when {
+                        trimmed.isEmpty() -> null
+                        trimmed.startsWith("data:", ignoreCase = true) -> null
+                        trimmed.contains("://") -> null
+                        else -> {
+                            val ref = resolve(docDir, trimmed)
+                            val ext = ref.substringAfterLast('.', "").lowercase()
+                            if (ext !in RASTER_EXTENSIONS) {
+                                null
+                            } else {
+                                val entry = zf.getEntry(ref)?.takeIf { it.size in 1..MAX_ILLUSTRATION_BYTES }
+                                // A mark too small to look at never becomes a block, so the block
+                                // list and the stored pictures can never disagree.
+                                if (entry == null || !pictureQualifies(zf, entry)) null else entry.name
+                            }
+                        }
+                    }
+                }
                 if (blocks.isEmpty()) continue
+                if (blocks.none { it.type != BlockType.IMAGE }) {
+                    // A document that holds nothing but pictures: no title, no thread of its own.
+                    if (chapters.isEmpty()) {
+                        leadingImages += blocks
+                    } else {
+                        val last = chapters.removeAt(chapters.lastIndex)
+                        chapters += last.copy(blocks = last.blocks + blocks)
+                    }
+                    continue
+                }
                 val tocTitle = tocTitles[item.href] ?: tocTitles[stripFragment(item.href)]
                 val chapterTitle = tocTitle?.takeIf { it.isNotBlank() }
                     ?: heading?.takeIf { it.isNotBlank() }
                     ?: "Chapter ${chapters.size + 1}"
                 val finalTitle = tidyTitle(chapterTitle)
-                chapters += ParsedChapter(
-                    title = finalTitle,
-                    blocks = ChapterBlocks.stripTitleHeading(blocks, finalTitle),
-                )
+                val body = ChapterBlocks.stripTitleHeading(blocks, finalTitle)
+                val withLeading = if (leadingImages.isEmpty()) body else leadingImages + body
+                leadingImages = mutableListOf()
+                chapters += ParsedChapter(title = finalTitle, blocks = withLeading)
             }
 
             if (chapters.isEmpty()) {
-                throw BookParseException(
-                    if (visited == 0) "This EPUB has no readable chapters." else "This EPUB contains no readable text.",
-                )
+                if (leadingImages.isEmpty()) {
+                    throw BookParseException(
+                        if (visited == 0) "This EPUB has no readable chapters." else "This EPUB contains no readable text.",
+                    )
+                }
+                // A picture book: nothing but plates, which still make a readable feed.
+                chapters += ParsedChapter(title = "Illustrations", blocks = leadingImages)
             }
 
             val cover = runCatching { coverBytes(zf, opf, manifest) }.getOrNull()
@@ -122,11 +170,60 @@ object EpubParser {
                 coverBytes = cover,
                 publisher = publisher,
                 publishedYear = publishedYear,
+                illustrations = collectIllustrations(zf, chapters),
             )
         }
     }
 
+    /**
+     * Reads the pictures the chapters refer to, once each. Any picture left out here (too large,
+     * unreadable, too small to be an illustration, or over the book's budget) is dropped along
+     * with its block at import time, so a damaged plate never turns into an empty post.
+     */
+    private fun collectIllustrations(zf: ZipFile, chapters: List<ParsedChapter>): Map<String, ByteArray> {
+        val refs = chapters.asSequence()
+            .flatMap { it.blocks.asSequence() }
+            .mapNotNull { it.imageRef }
+            .distinct()
+            .toList()
+        if (refs.isEmpty()) return emptyMap()
+        val out = LinkedHashMap<String, ByteArray>()
+        var total = 0L
+        for (ref in refs) {
+            val entry = zf.getEntry(ref) ?: continue
+            if (entry.size <= 0 || entry.size > MAX_ILLUSTRATION_BYTES) continue
+            if (total + entry.size > MAX_TOTAL_ILLUSTRATION_BYTES) break
+            val bytes = runCatching { readBytes(zf, entry, MAX_ILLUSTRATION_BYTES) }.getOrNull() ?: continue
+            if (bytes.isEmpty()) continue
+            if (!PictureFilter.qualifies(bytes)) continue
+            out[ref] = bytes
+            total += bytes.size
+        }
+        return out
+    }
+
     private data class ManifestItem(val id: String, val href: String, val mediaType: String, val properties: String)
+
+    /**
+     * Decides whether a picture is big enough to be worth a post by reading only the head of its
+     * entry: a chapter can repeat the same mark a hundred times and the whole picture is read once,
+     * further down, only for the pictures this lets through.
+     */
+    private fun pictureQualifies(zf: ZipFile, entry: java.util.zip.ZipEntry): Boolean {
+        val head = runCatching {
+            zf.getInputStream(entry).use { input ->
+                val out = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(8 * 1024)
+                while (out.size() < MAX_HEADER_BYTES) {
+                    val read = input.read(buffer, 0, minOf(buffer.size, MAX_HEADER_BYTES - out.size()))
+                    if (read <= 0) break
+                    out.write(buffer, 0, read)
+                }
+                out.toByteArray()
+            }
+        }.getOrNull() ?: return true
+        return PictureFilter.qualifies(head)
+    }
 
     private val HTML_TYPES = setOf("application/xhtml+xml", "text/html", "application/x-dtbook+xml")
 

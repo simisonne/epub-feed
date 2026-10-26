@@ -22,6 +22,7 @@ import com.epubfeed.domain.PostGenerator
 import com.epubfeed.domain.model.Block
 import com.epubfeed.domain.model.BlockType
 import com.epubfeed.domain.model.ChapterSummary
+import com.epubfeed.domain.model.CollectionOrder
 import com.epubfeed.domain.model.FeedPost
 import com.epubfeed.domain.model.PostLength
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -31,8 +32,11 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.UUID
@@ -80,11 +84,19 @@ class BookRepository @Inject constructor(
     fun observeChapterPosts(bookId: String, chapterIndex: Int): Flow<List<FeedPost>> =
         postDao.observeChapter(bookId, chapterIndex).map { rows -> rows.map { it.toFeedPost() } }
 
-    fun observeLiked(bookId: String): Flow<List<FeedPost>> =
-        postDao.observeLiked(bookId).map { rows -> rows.map { it.toFeedPost() } }
+    fun observeLiked(bookId: String): Flow<List<FeedPost>> = inReadingOrder(postDao.observeLiked(bookId))
 
-    fun observeSaved(bookId: String): Flow<List<FeedPost>> =
-        postDao.observeSaved(bookId).map { rows -> rows.map { it.toFeedPost() } }
+    fun observeSaved(bookId: String): Flow<List<FeedPost>> = inReadingOrder(postDao.observeSaved(bookId))
+
+    /**
+     * The Likes and Saved lists follow the book, so the first entry is the post nearest the start
+     * of the book. The setting flips that for readers who want the furthest read first.
+     */
+    private fun inReadingOrder(rows: Flow<List<PostRow>>): Flow<List<FeedPost>> =
+        combine(rows, settings.settings.map { it.collectionOrder }.distinctUntilChanged()) { list, order ->
+            val posts = list.map { it.toFeedPost() }
+            if (order == CollectionOrder.LAST_TO_FIRST) posts.asReversed() else posts
+        }
 
     fun observeNotes(bookId: String): Flow<List<NoteEntity>> = noteDao.observeForBook(bookId)
 
@@ -219,6 +231,8 @@ class BookRepository @Inject constructor(
         bookDao.delete(bookId)
         statsDao.deleteForBook(bookId)
         book?.coverPath?.let { path -> runCatching { File(path).delete() } }
+        runCatching { File(illustrationDir(bookId)).deleteRecursively() }
+        runCatching { File(avatarDir(bookId)).deleteRecursively() }
         if (settings.currentLastBookId() == bookId) {
             settings.setLastBookId(bookDao.all().firstOrNull()?.id)
         }
@@ -226,41 +240,78 @@ class BookRepository @Inject constructor(
 
     suspend fun setActiveBook(bookId: String) = settings.setLastBookId(bookId)
 
+    /** Renames the book: the display name, the author line and the @ the reader wants. */
+    suspend fun updateIdentity(bookId: String, title: String, author: String, handle: String?) {
+        val cleanTitle = title.trim().ifBlank { "Untitled" }
+        val cleanAuthor = author.trim().ifBlank { "Unknown author" }
+        val cleanTag = handle?.trim()?.removePrefix("@")?.trim()?.takeIf { it.isNotBlank() }
+        bookDao.updateIdentity(bookId, cleanTitle, cleanAuthor, cleanTag)
+    }
+
+    /** Sets the profile photo, or clears it back to the cover / letter fallback. */
+    suspend fun setAvatar(bookId: String, path: String?) {
+        bookDao.updateAvatar(bookId, path?.takeIf { File(it).exists() })
+    }
+
+    /** Picks the letter circle over the book's cover, or back again with a real picture. */
+    suspend fun useLetterAvatar(bookId: String) {
+        bookDao.updateAvatar(bookId, BookEntity.LetterAvatar)
+    }
+
+    /** Writes the library order the reader dragged into place, one position per book. */
+    suspend fun reorderBooks(bookIds: List<String>) {
+        if (bookIds.isEmpty()) return
+        db.withTransaction {
+            bookIds.forEachIndexed { index, id -> bookDao.updateLibraryOrder(id, index) }
+        }
+    }
+
     /**
-     * Stores a freshly parsed book. Posts are generated from the chapter paragraphs,
-     * which are also persisted so a post length change never needs the original file.
+     * Stores a freshly parsed book. Posts are generated from the chapter paragraphs, which are
+     * also persisted so a post length change never needs the original file.
+     *
+     * Pictures are written to app storage first: the parsed blocks carry ZIP entry names, the
+     * stored blocks carry file paths. A picture that could not be written loses its block, so a
+     * broken plate never leaves an empty post behind.
      */
     suspend fun persistParsedBook(
         parsed: ParsedBook,
         format: String,
         isSample: Boolean,
         length: PostLength,
+        pageImages: List<ByteArray> = emptyList(),
     ): String {
         val bookId = UUID.randomUUID().toString()
-        val chapterEntities = parsed.chapters.mapIndexed { index, chapter ->
+        val illustrationPaths = writeIllustrations(bookId, parsed.illustrations)
+        val slices = parsed.chapters.map { chapter ->
+            ChapterSlice(chapter.title, resolveImages(chapter.blocks, illustrationPaths))
+        }
+        if (slices.isEmpty()) {
+            throw com.epubfeed.data.epub.BookParseException("This book contains no readable text.")
+        }
+
+        val chapterEntities = slices.mapIndexed { index, slice ->
             ChapterEntity(
                 id = chapterId(bookId, index),
                 bookId = bookId,
                 index = index,
-                title = chapter.title,
-                blocksJson = json.encodeToString(ListSerializer, chapter.blocks),
+                title = slice.title,
+                blocksJson = json.encodeToString(ListSerializer, slice.blocks),
                 postCount = 0,
             )
         }
-        if (chapterEntities.isEmpty()) {
-            throw com.epubfeed.data.epub.BookParseException("This book contains no readable text.")
-        }
 
-        val coverPath = writeCover(bookId, parsed.coverBytes)
+        // A PDF rarely carries a cover image object, so its first rendered page becomes the cover.
+        // The rendered pages are also what the profile photo can be taken from.
+        val renderedPages = writePageImages(bookId, pageImages)
+        val coverPath = writeCover(bookId, parsed.coverBytes) ?: renderedPages.firstOrNull()
         var global = 0
         var words = 0
         val posts = ArrayList<PostEntity>()
-        val counts = IntArray(chapterEntities.size)
 
-        chapterEntities.forEach { chapter ->
-            val blocks = json.decodeFromString(ListSerializer, chapter.blocksJson)
-            val generated = generator.generate(chapter.title, blocks, length)
-            counts[chapter.index] = generated.size
+        slices.forEachIndexed { index, slice ->
+            val chapter = chapterEntities[index]
+            val generated = generator.generate(chapter.title, slice.blocks, length)
             chapter.postCount = generated.size
             generated.forEach { post ->
                 words += post.plainText.split(' ', '\n').count { it.isNotBlank() }
@@ -296,6 +347,7 @@ class BookRepository @Inject constructor(
             publisher = parsed.publisher,
             publishedYear = parsed.publishedYear,
             wordCount = words,
+            libraryOrder = bookDao.maxLibraryOrder() + 1,
         )
 
         db.withTransaction {
@@ -554,6 +606,31 @@ class BookRepository @Inject constructor(
         db.withTransaction { block() }
     }
 
+    /** Writes the book's pictures under its own folder and reports entry name -> file path. */
+    private fun writeIllustrations(bookId: String, illustrations: Map<String, ByteArray>): Map<String, String> {
+        if (illustrations.isEmpty()) return emptyMap()
+        val dir = File(illustrationDir(bookId)).apply { mkdirs() }
+        val out = HashMap<String, String>(illustrations.size)
+        illustrations.entries.forEachIndexed { index, (ref, bytes) ->
+            if (bytes.isEmpty()) return@forEachIndexed
+            val ext = ref.substringAfterLast('.', "img").lowercase().take(5)
+            val file = File(dir, "$index.$ext")
+            runCatching { file.writeBytes(bytes) }
+                .onSuccess { out[ref] = file.absolutePath }
+        }
+        return out
+    }
+
+    private fun illustrationDir(bookId: String): String = File(File(context.filesDir, "illustrations"), bookId).absolutePath
+
+    /** Swaps the parser's ZIP entry names for file paths, dropping pictures that were not written. */
+    private fun resolveImages(blocks: List<Block>, paths: Map<String, String>): List<Block> = blocks.mapNotNull { block ->
+        if (block.type != BlockType.IMAGE) return@mapNotNull block
+        val ref = block.imageRef ?: return@mapNotNull null
+        val path = paths[ref] ?: return@mapNotNull null
+        block.copy(imageRef = path)
+    }
+
     private fun writeCover(bookId: String, bytes: ByteArray?): String? {
         if (bytes == null || bytes.isEmpty()) return null
         return runCatching {
@@ -562,6 +639,22 @@ class BookRepository @Inject constructor(
             file.writeBytes(bytes)
             file.absolutePath
         }.getOrNull()
+    }
+
+    private fun avatarDir(bookId: String): String = File(File(context.filesDir, "avatars"), bookId).absolutePath
+
+    /** Writes the first pages of a PDF, numbered, so the avatar picker can offer them. */
+    private fun writePageImages(bookId: String, pages: List<ByteArray>): List<String> {
+        if (pages.isEmpty()) return emptyList()
+        val dir = File(avatarDir(bookId)).apply { mkdirs() }
+        return pages.mapIndexedNotNull { index, bytes ->
+            if (bytes.isEmpty()) return@mapIndexedNotNull null
+            runCatching {
+                val file = File(dir, "page-${index + 1}.jpg")
+                file.writeBytes(bytes)
+                file.absolutePath
+            }.getOrNull()
+        }
     }
 
     private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)

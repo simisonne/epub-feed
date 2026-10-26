@@ -111,4 +111,36 @@ class PostGeneratorTest {
         val covered = posts.flatMap { (it.firstBlock..it.lastBlock).toList() }.sorted()
         assertEquals(blocks.indices.toList(), covered)
     }
+
+    @Test
+    fun `a picture is its own post, never sharing one with the prose`() {
+        val blocks = listOf(
+            Block(BlockType.PARAGRAPH, listOf(Run("Text before the plate."))),
+            Block(BlockType.IMAGE, imageRef = "OEBPS/plate.png", imageAlt = "A plate"),
+            Block(BlockType.PARAGRAPH, listOf(Run("Text after the plate."))),
+        )
+
+        val posts = generator.generate("Chapter", blocks, PostLength.LONG)
+
+        assertEquals(listOf(BlockType.HEADING, BlockType.PARAGRAPH, BlockType.IMAGE, BlockType.PARAGRAPH), posts.map { it.blocks.first().type })
+        val picturePost = posts[2]
+        assertEquals("OEBPS/plate.png", picturePost.blocks.single().imageRef)
+        assertEquals(1, picturePost.firstBlock)
+        assertEquals(1, picturePost.lastBlock)
+        assertEquals("", picturePost.plainText)
+        assertEquals(listOf(0, 1, 2), posts.drop(1).flatMap { (it.firstBlock..it.lastBlock).toList() })
+    }
+
+    @Test
+    fun `back to back pictures stay separate posts`() {
+        val blocks = listOf(
+            Block(BlockType.IMAGE, imageRef = "a.png"),
+            Block(BlockType.IMAGE, imageRef = "b.png"),
+        )
+
+        val posts = generator.generate("Chapter", blocks, PostLength.MEDIUM).drop(1)
+
+        assertEquals(2, posts.size)
+        assertEquals(listOf("a.png", "b.png"), posts.map { it.blocks.single().imageRef })
+    }
 }

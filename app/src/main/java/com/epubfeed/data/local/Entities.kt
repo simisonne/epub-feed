@@ -5,6 +5,7 @@ import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import com.epubfeed.domain.model.handleFor
 
 @Entity(tableName = "books")
 data class BookEntity(
@@ -27,7 +28,40 @@ data class BookEntity(
     val publishedYear: String? = null,
     /** Total words in the book, used for the reading time and page estimates. */
     val wordCount: Int = 0,
-)
+    /**
+     * The @ the reader chose for this book. Empty means "derive it from the author", so a book
+     * that was never edited keeps following its metadata.
+     */
+    val handle: String? = null,
+    /** A picture the reader picked as the profile photo. Null falls back to the cover. */
+    val avatarPath: String? = null,
+    /** Position in the library drawer; the reader drags books into the order they want. */
+    val libraryOrder: Int = 0,
+) {
+    /**
+     * The picture the avatar draws. The reader's own choice wins, then the cover, and when neither
+     * exists the avatar falls back to the letter circle.
+     */
+    val avatarSource: String? get() = when {
+        avatarPath == LetterAvatar -> null
+        avatarPath != null -> avatarPath
+        else -> coverPath
+    }
+
+    /** True when the reader asked for the letter circle even though the book has a cover. */
+    val showsLetter: Boolean get() = avatarPath == LetterAvatar
+
+    /** The @ shown next to the display name. */
+    val displayHandle: String get() = handle?.takeIf { it.isNotBlank() } ?: handleFor(author)
+
+    companion object {
+        /**
+         * Stored in `avatarPath` when the reader picks the letter circle over the book's cover.
+         * A null path still means "automatic": the cover when there is one, the letter otherwise.
+         */
+        const val LetterAvatar = ""
+    }
+}
 
 @Entity(
     tableName = "chapters",

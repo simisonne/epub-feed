@@ -46,7 +46,7 @@ val FeedTabs = listOf("Feed", "Chapters", "Likes", "Saved")
 fun FeedTopBar(
     title: String,
     author: String,
-    coverPath: String?,
+    avatarPath: String?,
     hue: Int,
     progress: Float,
     selectedTab: Int,
@@ -77,7 +77,7 @@ fun FeedTopBar(
                 contentAlignment = Alignment.Center,
             ) {
                 BookAvatar(
-                    coverPath = coverPath,
+                    avatarPath = avatarPath,
                     title = title,
                     hue = hue,
                     size = 32.dp,

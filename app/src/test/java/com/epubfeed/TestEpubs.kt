@@ -21,6 +21,7 @@ object TestEpubs {
         useNcxOnly: Boolean = false,
         includeToc: Boolean = true,
         extraEntries: Map<String, String> = emptyMap(),
+        extraBinaryEntries: Map<String, ByteArray> = emptyMap(),
     ): File {
         dir.mkdirs()
         val file = File(dir, name)
@@ -49,6 +50,18 @@ object TestEpubs {
             }
             if (includeToc) {
                 items += """<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>"""
+            }
+            extraBinaryEntries.keys.forEach { path ->
+                val href = path.removePrefix("OEBPS/")
+                val id = "res-" + href.substringBeforeLast('.').replace(Regex("[^A-Za-z0-9]"), "-")
+                val media = when (href.substringAfterLast('.').lowercase()) {
+                    "png" -> "image/png"
+                    "jpg", "jpeg" -> "image/jpeg"
+                    "gif" -> "image/gif"
+                    "svg" -> "image/svg+xml"
+                    else -> "application/octet-stream"
+                }
+                items += """<item id="$id" href="$href" media-type="$media"/>"""
             }
             val manifest = items.joinToString("")
 
@@ -105,6 +118,12 @@ object TestEpubs {
                 zip.write(content.toByteArray())
                 zip.closeEntry()
             }
+
+            extraBinaryEntries.forEach { (path, bytes) ->
+                zip.putNextEntry(ZipEntry(path))
+                zip.write(bytes)
+                zip.closeEntry()
+            }
         }
         return file
     }
@@ -114,5 +133,24 @@ object TestEpubs {
         val file = File(dir, name)
         file.writeBytes(byteArrayOf(0x50, 0x4B, 0x03, 0x04, 0x00, 0x01, 0x02, 0x03, 0x63))
         return file
+    }
+
+    /**
+     * A PNG with real dimensions in its header and no pixel data.
+     *
+     * That is all the parser and the picture filter ever look at, so a test can say "a 400x600
+     * plate" without shipping a photograph.
+     */
+    fun png(width: Int, height: Int): ByteArray {
+        val header = byteArrayOf(
+            0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+            0x00, 0x00, 0x00, 0x0D,
+            0x49, 0x48, 0x44, 0x52,
+            (width ushr 24).toByte(), (width ushr 16).toByte(), (width ushr 8).toByte(), width.toByte(),
+            (height ushr 24).toByte(), (height ushr 16).toByte(), (height ushr 8).toByte(), height.toByte(),
+            0x08, 0x02, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+        )
+        return header
     }
 }

@@ -8,6 +8,7 @@ import com.epubfeed.data.epub.EpubParser
 import com.epubfeed.data.epub.ParsedBook
 import com.epubfeed.data.pdf.PdfBookParser
 import com.epubfeed.data.pdf.PdfBoxTextSource
+import com.epubfeed.data.pdf.PdfPageRenderer
 import com.epubfeed.data.prefs.SettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -92,12 +93,22 @@ class ImportManager @Inject constructor(
             }
             val normalized = parsed.copy(title = title, author = author)
 
+            // A PDF has no cover image object, so its first page is drawn and becomes the cover,
+            // which is also the photo the reader can pick on the profile.
+            val pageImages = if (format == Format.PDF) {
+                _state.value = ImportState.Working("Drawing the cover", null)
+                withContext(Dispatchers.IO) { PdfPageRenderer.renderPages(temp, count = 1) }
+            } else {
+                emptyList()
+            }
+
             val bookId = withContext(Dispatchers.IO) {
                 repository.persistParsedBook(
                     parsed = normalized,
                     format = format.name,
                     isSample = false,
                     length = length,
+                    pageImages = pageImages,
                 )
             }
             _state.value = ImportState.Success(bookId, normalized.title)

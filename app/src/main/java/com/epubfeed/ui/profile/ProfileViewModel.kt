@@ -10,7 +10,6 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -32,30 +31,22 @@ data class ProfileUiState(
 ) {
     /** Very rough print page count: 275 words per page. */
     val estimatedPages: Int get() = if (wordCount <= 0) 0 else (wordCount / 275).coerceAtLeast(1)
-
-    /** How long the book takes at a relaxed 240 words per minute. */
-    val estimatedMinutes: Int get() = if (wordCount <= 0) 0 else (wordCount / 240).coerceAtLeast(1)
-
-    val minutesLeft: Int
-        get() {
-            val total = estimatedMinutes
-            val remaining = (total * (1f - progress)).toInt()
-            return remaining.coerceAtLeast(if (total > 0) 1 else 0)
-        }
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class ProfileViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
-    repository: BookRepository,
+    private val repository: BookRepository,
 ) : ViewModel() {
 
     private val bookId: String? = savedStateHandle.get<String>("bookId")
 
     init {
-        // Older imports predate the stored word count; fill it once so the profile has it.
-        bookId?.let { id -> viewModelScope.launch { runCatching { repository.ensureWordCount(id) } } }
+        bookId?.let { id ->
+            // Older imports predate the stored word count; fill it once so the profile has it.
+            viewModelScope.launch { runCatching { repository.ensureWordCount(id) } }
+        }
     }
 
     private val bookFlow = bookId?.let { repository.observeBook(it) } ?: flowOf(null)
@@ -91,4 +82,22 @@ class ProfileViewModel @Inject constructor(
                 .orEmpty(),
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ProfileUiState())
+
+    /** Saves the name, the author and the @ the reader typed. */
+    fun saveIdentity(title: String, author: String, handle: String) {
+        val id = bookId ?: return
+        viewModelScope.launch { repository.updateIdentity(id, title, author, handle) }
+    }
+
+    /** Uses the book's first page, which is also its cover, as the profile photo. */
+    fun useFirstPageAvatar(path: String) {
+        val id = bookId ?: return
+        viewModelScope.launch { repository.setAvatar(id, path) }
+    }
+
+    /** Uses the letter circle instead of the book's cover. */
+    fun useLetterAvatar() {
+        val id = bookId ?: return
+        viewModelScope.launch { repository.useLetterAvatar(id) }
+    }
 }

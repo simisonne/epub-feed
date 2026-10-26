@@ -16,6 +16,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.epubfeed.domain.model.ChapterSummary
 import com.epubfeed.domain.model.FeedPost
 import com.epubfeed.domain.model.Note
 import com.epubfeed.ui.components.EmptyState
@@ -37,11 +38,11 @@ fun PostCollectionTab(
     emptyIcon: ImageVector,
     displayName: String,
     handle: String,
-    coverPath: String?,
+    avatarPath: String?,
     hue: Int,
     readingFontSize: TextUnit,
     readingFontFamily: FontFamily,
-    totalPosts: Int,
+    chapters: List<ChapterSummary>,
     onLike: (FeedPost) -> Unit,
     onBookmark: (FeedPost) -> Unit,
     onComment: (FeedPost) -> Unit,
@@ -74,13 +75,16 @@ fun PostCollectionTab(
                 post = post,
                 displayName = displayName,
                 handle = handle,
-                coverPath = coverPath,
+                avatarPath = avatarPath,
                 hue = hue,
                 showThreadLine = false,
                 showChapterDivider = false,
                 readingFontSize = readingFontSize,
                 readingFontFamily = readingFontFamily,
-                viewsLabel = percentLabel(post.globalIndex, totalPosts),
+                viewsLabel = percentLabel(
+                    post = post,
+                    chapterPosts = chapters.firstOrNull { it.index == post.chapterIndex }?.postCount ?: 0,
+                ),
                 notes = notes[post.id].orEmpty(),
                 onLike = { onLike(post) },
                 onBookmark = { onBookmark(post) },
@@ -104,11 +108,11 @@ fun LikedTab(
     notes: Map<String, List<Note>>,
     displayName: String,
     handle: String,
-    coverPath: String?,
+    avatarPath: String?,
     hue: Int,
     readingFontSize: TextUnit,
     readingFontFamily: FontFamily,
-    totalPosts: Int,
+    chapters: List<ChapterSummary>,
     onLike: (FeedPost) -> Unit,
     onBookmark: (FeedPost) -> Unit,
     onComment: (FeedPost) -> Unit,
@@ -127,11 +131,11 @@ fun LikedTab(
     emptyIcon = FeedIcons.LikeOutline,
     displayName = displayName,
     handle = handle,
-    coverPath = coverPath,
+    avatarPath = avatarPath,
     hue = hue,
     readingFontSize = readingFontSize,
     readingFontFamily = readingFontFamily,
-    totalPosts = totalPosts,
+    chapters = chapters,
     onLike = onLike,
     onBookmark = onBookmark,
     onComment = onComment,
@@ -149,11 +153,11 @@ fun SavedTab(
     notes: Map<String, List<Note>>,
     displayName: String,
     handle: String,
-    coverPath: String?,
+    avatarPath: String?,
     hue: Int,
     readingFontSize: TextUnit,
     readingFontFamily: FontFamily,
-    totalPosts: Int,
+    chapters: List<ChapterSummary>,
     onLike: (FeedPost) -> Unit,
     onBookmark: (FeedPost) -> Unit,
     onComment: (FeedPost) -> Unit,
@@ -172,11 +176,11 @@ fun SavedTab(
     emptyIcon = FeedIcons.BookmarkOutline,
     displayName = displayName,
     handle = handle,
-    coverPath = coverPath,
+    avatarPath = avatarPath,
     hue = hue,
     readingFontSize = readingFontSize,
     readingFontFamily = readingFontFamily,
-    totalPosts = totalPosts,
+    chapters = chapters,
     onLike = onLike,
     onBookmark = onBookmark,
     onComment = onComment,
@@ -187,8 +191,3 @@ fun SavedTab(
     onLongPress = onLongPress,
     onOpen = onOpen,
 )
-
-fun percentLabel(index: Int, total: Int): String {
-    if (total <= 0) return "0%"
-    return "${((index + 1) * 100 / total).coerceIn(0, 100)}%"
-}

@@ -44,6 +44,7 @@ fun AppNav(
             setFont = settingsViewModel::setFont,
             setTextSize = settingsViewModel::setTextSize,
             setPostLength = settingsViewModel::setPostLength,
+            setCollectionOrder = settingsViewModel::setCollectionOrder,
         )
     }
 

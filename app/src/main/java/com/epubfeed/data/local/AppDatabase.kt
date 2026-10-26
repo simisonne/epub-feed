@@ -15,7 +15,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         NoteEntity::class,
         BookStatsEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -60,6 +60,19 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE `books` ADD COLUMN `publisher` TEXT")
                 db.execSQL("ALTER TABLE `books` ADD COLUMN `publishedYear` TEXT")
                 db.execSQL("ALTER TABLE `books` ADD COLUMN `wordCount` INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        /**
+         * Adds the editable identity (name, author, @), the chosen profile picture and the library
+         * order. Existing books keep the order they were imported in: every row starts at 0 and the
+         * tie break is `importedAt`, and the first drag writes real positions.
+         */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `books` ADD COLUMN `handle` TEXT")
+                db.execSQL("ALTER TABLE `books` ADD COLUMN `avatarPath` TEXT")
+                db.execSQL("ALTER TABLE `books` ADD COLUMN `libraryOrder` INTEGER NOT NULL DEFAULT 0")
             }
         }
     }

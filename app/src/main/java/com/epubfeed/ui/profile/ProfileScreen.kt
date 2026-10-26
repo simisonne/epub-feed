@@ -1,6 +1,7 @@
 package com.epubfeed.ui.profile
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,6 +28,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -55,6 +59,8 @@ fun ProfileScreen(
     val ui by viewModel.uiState.collectAsStateWithLifecycle()
     val x = LocalXColors.current
     val book = ui.book
+    var editingIdentity by remember { mutableStateOf(false) }
+    var editingPhoto by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -121,13 +127,15 @@ fun ProfileScreen(
                         .size(84.dp)
                         .clip(CircleShape)
                         .background(x.background)
-                        .padding(3.dp),
+                        .padding(3.dp)
+                        .clickable { editingPhoto = true },
                 ) {
                     BookAvatar(
-                        coverPath = book?.coverPath,
+                        avatarPath = book?.avatarSource,
                         title = book?.title.orEmpty(),
                         hue = book?.hue ?: 210,
                         size = 78.dp,
+                        contentDescription = "Change the profile photo",
                     )
                 }
                 Spacer(Modifier.weight(1f))
@@ -155,10 +163,27 @@ fun ProfileScreen(
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    text = "@${handleFor(book?.author.orEmpty())}",
+                    text = "@${book?.displayHandle.orEmpty()}",
                     color = x.muted,
                     fontSize = 15.sp,
                 )
+                Spacer(Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .border(1.dp, x.divider, RoundedCornerShape(999.dp))
+                            .clickable { editingIdentity = true }
+                            .padding(horizontal = 16.dp, vertical = 7.dp),
+                    ) {
+                        Text(
+                            text = "Edit profile",
+                            color = x.text,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
                 Spacer(Modifier.height(10.dp))
                 Text(
                     text = buildString {
@@ -176,7 +201,7 @@ fun ProfileScreen(
                 if (ui.currentChapter.isNotBlank()) {
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        text = "Currently in: ${ui.currentChapter}",
+                        text = "Now reading ${ui.currentChapter}",
                         color = x.muted,
                         fontSize = 14.sp,
                     )
@@ -196,31 +221,16 @@ fun ProfileScreen(
                 HorizontalDivider(color = x.divider, thickness = 1.dp)
                 Spacer(Modifier.height(16.dp))
 
-                SectionTitle("Reading time")
-                Spacer(Modifier.height(8.dp))
-                Row(Modifier.fillMaxWidth()) {
-                    InfoCell("Tracked", formatDuration(ui.secondsRead), Modifier.weight(1f))
-                    InfoCell("Full book", "~${formatMinutes(ui.estimatedMinutes)}", Modifier.weight(1f))
-                    InfoCell("Left", "~${formatMinutes(ui.minutesLeft)}", Modifier.weight(1f))
-                }
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text = "Time only counts while you are reading: it pauses after two minutes without a touch.",
-                    color = x.muted,
-                    fontSize = 12.sp,
-                    lineHeight = 16.sp,
-                )
-
-                Spacer(Modifier.height(20.dp))
-                HorizontalDivider(color = x.divider, thickness = 1.dp)
-                Spacer(Modifier.height(16.dp))
-
                 SectionTitle("About this book")
                 Spacer(Modifier.height(10.dp))
                 MetaRow("Publisher", book?.publisher ?: "Not listed")
                 MetaRow("Published", book?.publishedYear ?: "Not listed")
                 MetaRow("Format", book?.format ?: "-")
-                MetaRow("Length", "${formatWords(ui.wordCount)} words \u00B7 ~${ui.estimatedPages} pages")
+                MetaRow(
+                    "Length",
+                    "${formatWords(ui.wordCount)} ${plural(ui.wordCount, "word")} \u00B7 " +
+                        "~${ui.estimatedPages} ${plural(ui.estimatedPages, "page")}",
+                )
                 MetaRow("Imported", book?.importedAt?.let { formatDate(it) } ?: "-")
 
                 Spacer(Modifier.height(20.dp))
@@ -229,6 +239,7 @@ fun ProfileScreen(
 
                 SectionTitle("Your activity")
                 Spacer(Modifier.height(10.dp))
+                MetaRow("Tracked time", formatDuration(ui.secondsRead))
                 MetaRow("Liked posts", ui.likeCount.toString())
                 MetaRow("Saved posts", ui.bookmarkCount.toString())
                 MetaRow("Notes written", ui.noteCount.toString())
@@ -236,6 +247,38 @@ fun ProfileScreen(
                 Spacer(Modifier.height(40.dp))
             }
         }
+    }
+
+    if (editingIdentity && book != null) {
+        ProfileEditorSheet(
+            title = book.title,
+            author = book.author,
+            handle = book.handle.orEmpty(),
+            onSave = { name, author, handle ->
+                viewModel.saveIdentity(name, author, handle)
+                editingIdentity = false
+            },
+            onDismiss = { editingIdentity = false },
+        )
+    }
+
+    if (editingPhoto && book != null) {
+        AvatarPickerSheet(
+            coverPath = book.coverPath,
+            pageLabel = if (book.format == "PDF") "First page" else "Cover",
+            title = book.title,
+            hue = book.hue,
+            letterSelected = book.showsLetter,
+            onUseFirstPage = {
+                book.coverPath?.let(viewModel::useFirstPageAvatar)
+                editingPhoto = false
+            },
+            onUseLetter = {
+                viewModel.useLetterAvatar()
+                editingPhoto = false
+            },
+            onDismiss = { editingPhoto = false },
+        )
     }
 }
 
@@ -303,15 +346,6 @@ private fun SectionTitle(text: String) {
 }
 
 @Composable
-private fun InfoCell(label: String, value: String, modifier: Modifier = Modifier) {
-    val x = LocalXColors.current
-    Column(modifier) {
-        Text(value, color = x.text, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-        Text(label, color = x.muted, fontSize = 12.sp)
-    }
-}
-
-@Composable
 private fun MetaRow(label: String, value: String) {
     val x = LocalXColors.current
     Row(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
@@ -329,23 +363,13 @@ internal fun formatDuration(seconds: Long): String {
     return if (rest == 0L) "${hours}h" else "${hours}h ${rest}m"
 }
 
-private fun formatMinutes(minutes: Int): String = when {
-    minutes <= 0 -> "0m"
-    minutes < 60 -> "${minutes}m"
-    else -> "${minutes / 60}h ${minutes % 60}m"
-}
-
 private fun formatWords(words: Int): String = when {
     words >= 1_000_000 -> String.format(Locale.US, "%.1fM", words / 1_000_000f)
     words >= 1_000 -> String.format(Locale.US, "%.1fk", words / 1_000f)
     else -> words.toString()
 }
 
+private fun plural(count: Int, noun: String): String = if (count == 1) noun else "${noun}s"
+
 private fun formatDate(millis: Long): String =
     SimpleDateFormat("d MMM yyyy", Locale.getDefault()).format(Date(millis))
-
-private fun handleFor(author: String): String = author.lowercase()
-    .replace(Regex("[^a-z0-9]+"), "_")
-    .trim('_')
-    .ifBlank { "unknown" }
-    .take(20)

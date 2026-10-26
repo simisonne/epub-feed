@@ -7,6 +7,7 @@
 <p align="center"><strong>Your books, as a timeline.</strong><br>An offline Android reader that turns EPUB and PDF files into an X style feed.</p>
 
 <p align="center">
+  <a href="https://github.com/simisonne/epub-feed/releases/latest"><strong>Download</strong></a> ·
   <a href="#what-it-does">Features</a> ·
   <a href="#install">Install</a> ·
   <a href="#first-read">First read</a> ·
@@ -58,20 +59,24 @@ them, and when the chapter runs out a single blue button takes you to the next o
 
 ## Install
 
-There is no store listing yet, so build the debug APK and install it over `adb` on a phone
-running Android 8.0 or newer.
+Download `epub-feed-1.9.apk` from [Releases](https://github.com/simisonne/epub-feed/releases/latest)
+and open it on a phone running Android 8.0 or newer, or push it over `adb`.
 
 | Step | Command |
 | --- | --- |
+| Install the release | `adb install -r epub-feed-1.9.apk` |
 | Get the code | `git clone https://github.com/simisonne/epub-feed.git` |
 | Point Gradle at your SDK | `echo "sdk.dir=/path/to/Android/sdk" > local.properties` |
 | Build the APK | `./gradlew assembleDebug` |
-| Install it | `adb install -r app/build/outputs/apk/debug/app-debug.apk` |
+| Install your build | `adb install -r app/build/outputs/apk/debug/app-debug.apk` |
 | Run the unit tests | `./gradlew testDebugUnitTest` |
 
-You need JDK 21 and an Android SDK with platform 37 and build tools 36. The tests cover post
-generation, EPUB parsing, PDF parsing, image sizing and position restore, and they run on the
-JVM, so no device is needed.
+The release APK is signed with the project's debug key, the same one every debug build uses, so
+it installs over an older copy and keeps your library, likes and notes.
+
+Building from source needs JDK 21 and an Android SDK with platform 37 and build tools 36. The
+tests cover post generation, EPUB parsing, PDF parsing, image sizing and position restore, and
+they run on the JVM, so no device is needed.
 
 ## First read
 

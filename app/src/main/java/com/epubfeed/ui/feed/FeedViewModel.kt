@@ -40,18 +40,26 @@ data class FeedUiState(
     val chapterIndex: Int = 0,
     val chapterTitle: String = "",
     val hasNextChapter: Boolean = false,
+    /**
+     * True when [posts] are the posts of the chapter the reader is on. A book or chapter switch
+     * changes the index and the posts on separate flows, so for a moment the feed still carries
+     * the previous chapter's list. Nothing may scroll or save against that list.
+     */
+    val postsMatchChapter: Boolean = true,
     val likedPosts: List<FeedPost> = emptyList(),
     val savedPosts: List<FeedPost> = emptyList(),
-    val totalPosts: Int = 0,
     /** Global index of the post the reader is on right now. */
     val currentIndex: Int = 0,
     val scrollTarget: Int? = null,
     val busyMessage: String? = null,
 )
 
+/** The chapter posts that are loaded right now, tagged with the book and chapter they came from. */
+private data class Slice(val bookId: String?, val chapterIndex: Int, val posts: List<FeedPost>)
+
 private data class Core(
     val book: BookEntity?,
-    val chapterPosts: List<FeedPost>,
+    val slice: Slice,
     val chapters: List<ChapterSummary>,
     val liked: List<FeedPost>,
     val saved: List<FeedPost>,
@@ -91,9 +99,18 @@ class FeedViewModel @Inject constructor(
         if (id == null) flowOf(null) else repository.observeBook(id)
     }
 
-    private val postsFlow = combine(activeBookId, chapterIndex) { id, index -> id to index }
+    /**
+     * The posts of the chapter the reader is on. The slice keeps its own book and chapter, because
+     * the book, the chapter index and the posts arrive on separate flows: right after a switch the
+     * index is already new while the posts are still the old list.
+     */
+    private val sliceFlow = combine(activeBookId, chapterIndex) { id, index -> id to index }
         .flatMapLatest { (id, index) ->
-            if (id == null) flowOf(emptyList()) else repository.observeChapterPosts(id, index)
+            if (id == null) {
+                flowOf(Slice(null, index, emptyList()))
+            } else {
+                repository.observeChapterPosts(id, index).map { posts -> Slice(id, index, posts) }
+            }
         }
 
     private val chaptersFlow = activeBookId.flatMapLatest { id ->
@@ -113,7 +130,7 @@ class FeedViewModel @Inject constructor(
     }
 
     private val coreFlow = combine(
-        combine(bookFlow, postsFlow, chaptersFlow) { book, posts, chapters -> Triple(book, posts, chapters) },
+        combine(bookFlow, sliceFlow, chaptersFlow) { book, slice, chapters -> Triple(book, slice, chapters) },
         combine(likedFlow, savedFlow, notesFlow) { liked, saved, notes ->
             Triple(
                 liked,
@@ -125,7 +142,7 @@ class FeedViewModel @Inject constructor(
     ) { head, tail ->
         Core(
             book = head.first,
-            chapterPosts = head.second,
+            slice = head.second,
             chapters = head.third,
             liked = tail.first,
             saved = tail.second,
@@ -140,19 +157,20 @@ class FeedViewModel @Inject constructor(
     val uiState: StateFlow<FeedUiState> =
         combine(coreFlow, partFlow, repository.observeBooks()) { core, part, books ->
             val chapter = core.chapters.getOrNull(part.chapterIndex)
+            val slice = core.slice
             FeedUiState(
                 loading = part.loading,
                 books = books,
                 book = core.book,
-                posts = core.chapterPosts,
+                posts = slice.posts,
                 notes = core.notes,
                 chapters = core.chapters,
                 chapterIndex = part.chapterIndex,
                 chapterTitle = chapter?.title.orEmpty(),
                 hasNextChapter = part.chapterIndex < core.chapters.size - 1,
+                postsMatchChapter = slice.bookId == core.book?.id && slice.chapterIndex == part.chapterIndex,
                 likedPosts = core.liked,
                 savedPosts = core.saved,
-                totalPosts = core.book?.postCount ?: 0,
                 currentIndex = part.currentIndex,
                 scrollTarget = part.scrollTarget,
                 busyMessage = part.busy,
@@ -235,7 +253,11 @@ class FeedViewModel @Inject constructor(
     /** The list index of the top visible post inside the current chapter. */
     fun onVisibleListIndex(listIndex: Int) {
         if (scrollTarget.value != null) return
-        val post = uiState.value.posts.getOrNull(listIndex) ?: return
+        val ui = uiState.value
+        // A list that is still the previous chapter describes posts of another book: index 0 of
+        // it wrote the reading position away.
+        if (!ui.postsMatchChapter) return
+        val post = ui.posts.getOrNull(listIndex) ?: return
         lastVisibleIndex = post.globalIndex
         currentIndex.value = post.globalIndex
         activeBookId.value?.let { id -> repository.saveReadingPositionAsync(id, post.globalIndex) }
@@ -244,6 +266,19 @@ class FeedViewModel @Inject constructor(
     /** Jumps to any post in the book, opening the chapter that contains it. */
     fun openPost(globalIndex: Int) {
         viewModelScope.launch { jumpToPosition(activeBookId.value ?: return@launch, globalIndex) }
+    }
+
+    /**
+     * Puts the reader back where they were when the feed is built from scratch again.
+     *
+     * The position is restored from the book when a book is opened, but leaving the feed for the
+     * profile and coming back rebuilds the list without changing the book, so the old restore never
+     * runs and the feed would sit at the top of the chapter.
+     */
+    fun restorePositionIfNeeded() {
+        if (scrollTarget.value != null) return
+        val index = currentIndex.value
+        if (index > 0) scrollTarget.value = index
     }
 
     fun consumeScrollTarget() {
@@ -326,12 +361,19 @@ class FeedViewModel @Inject constructor(
 
     fun switchToBook(book: BookEntity) {
         if (activeBookId.value == book.id) return
+        // The new book's own lastPostIndex becomes the target when its row arrives; asking for
+        // post 0 here only scrolled the list that is about to be replaced.
         restoredFor = null
         currentIndex.value = 0
         chapterIndex.value = 0
-        scrollTarget.value = 0
+        scrollTarget.value = null
         activeBookId.value = book.id
         viewModelScope.launch { settingsRepository.setLastBookId(book.id) }
+    }
+
+    /** The library order the reader dragged into place, written as one position per book. */
+    fun moveBooks(bookIds: List<String>) {
+        viewModelScope.launch { repository.reorderBooks(bookIds) }
     }
 
     fun savePositionNow() {

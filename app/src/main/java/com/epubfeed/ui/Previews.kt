@@ -65,7 +65,7 @@ private fun PostLightsOutPreview() {
                 post = samplePost,
                 displayName = "Pride and Prejudice",
                 handle = "jane_austen",
-                coverPath = null,
+                avatarPath = null,
                 hue = 205,
                 showThreadLine = true,
                 showChapterDivider = false,
@@ -94,7 +94,7 @@ private fun FeedTopBarPreview() {
             FeedTopBar(
                 title = "Pride and Prejudice",
                 author = "Jane Austen",
-                coverPath = null,
+                avatarPath = null,
                 hue = 205,
                 progress = 0.34f,
                 selectedTab = 0,
@@ -111,7 +111,7 @@ private fun FeedTopBarPreview() {
 private fun ChaptersPreview() {
     EpubFeedTheme(ThemeMode.DIM) {
         PreviewSurface {
-            ChaptersTab(chapters = sampleChapters, lastPostIndex = 20, onChapterClick = {})
+            ChaptersTab(chapters = sampleChapters, lastPostIndex = 20, onChapterClick = {}, onUnmark = {})
         }
     }
 }
@@ -125,7 +125,7 @@ private fun PostLightPreview() {
                 post = samplePost.copy(liked = false, bookmarked = true),
                 displayName = "Pride and Prejudice",
                 handle = "jane_austen",
-                coverPath = null,
+                avatarPath = null,
                 hue = 205,
                 showThreadLine = false,
                 showChapterDivider = true,

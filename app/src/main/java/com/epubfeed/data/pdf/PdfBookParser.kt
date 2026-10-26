@@ -3,16 +3,21 @@ package com.epubfeed.data.pdf
 import com.epubfeed.data.epub.BookParseException
 import com.epubfeed.data.epub.ParsedBook
 import com.epubfeed.data.epub.ParsedChapter
+import com.epubfeed.data.image.PictureFilter
 import com.epubfeed.domain.model.Block
+import com.epubfeed.domain.model.BlockType
 
 /**
  * Builds chapters out of a PDF: the outline when it has usable page targets,
- * otherwise fixed size page chunks. Text is sanitized into paragraphs.
+ * otherwise fixed size page chunks. Text is sanitized into paragraphs and the
+ * pictures drawn on a page follow that page's text, so a figure lands in the feed
+ * right after the paragraph that explains it.
  */
 object PdfBookParser {
 
     const val DEFAULT_PAGES_PER_CHAPTER = 10
     private const val MIN_MEANINGFUL_CHARS = 40
+    private const val MAX_PICTURES_PER_BOOK = 400
 
     fun parse(
         source: PdfTextSource,
@@ -23,10 +28,12 @@ object PdfBookParser {
         if (pageCount <= 0) throw BookParseException("This PDF has no pages.")
 
         val pageTexts = ArrayList<String>(pageCount)
+        val pagePictures = ArrayList<List<PdfPageImage>>(pageCount)
         var meaningfulChars = 0
         for (page in 0 until pageCount) {
             val text = runCatching { source.pageText(page) }.getOrDefault("")
             pageTexts += text
+            pagePictures += runCatching { source.pageImages(page) }.getOrDefault(emptyList())
             meaningfulChars += text.count { !it.isWhitespace() }
             onProgress(page + 1, pageCount)
         }
@@ -55,9 +62,20 @@ object PdfBookParser {
             }
         }
 
+        // One picture, one entry: a border or a logo repeated on every page is kept once.
+        val illustrations = LinkedHashMap<String, ByteArray>()
         val chapters = ranges.mapNotNull { (title, start, end) ->
-            val text = (start until end).joinToString("\n\n") { pageTexts[it] }
-            val blocks: List<Block> = PdfTextSanitizer.toBlocks(text)
+            val blocks = ArrayList<Block>()
+            for (page in start until end) {
+                blocks += PdfTextSanitizer.toBlocks(pageTexts[page])
+                for (picture in pagePictures[page]) {
+                    if (illustrations.size >= MAX_PICTURES_PER_BOOK) break
+                    if (!PictureFilter.qualifies(picture.width, picture.height)) continue
+                    if (illustrations.containsKey(picture.key)) continue
+                    illustrations[picture.key] = picture.bytes
+                    blocks += Block(type = BlockType.IMAGE, imageRef = picture.key)
+                }
+            }
             val cleaned = com.epubfeed.data.epub.ChapterBlocks.stripTitleHeading(blocks, title)
             if (cleaned.isEmpty()) null else ParsedChapter(title = title, blocks = cleaned)
         }
@@ -71,6 +89,7 @@ object PdfBookParser {
             author = source.author?.trim().orEmpty(),
             chapters = chapters,
             coverBytes = null,
+            illustrations = illustrations,
         )
     }
 

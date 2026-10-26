@@ -3,8 +3,10 @@ package com.epubfeed
 import com.epubfeed.data.epub.BookParseException
 import com.epubfeed.data.pdf.PdfBookParser
 import com.epubfeed.data.pdf.PdfOutlineEntry
+import com.epubfeed.data.pdf.PdfPageImage
 import com.epubfeed.data.pdf.PdfTextSanitizer
 import com.epubfeed.data.pdf.PdfTextSource
+import com.epubfeed.domain.model.BlockType
 import org.apache.pdfbox.pdmodel.PDDocument
 import org.apache.pdfbox.pdmodel.PDPage
 import org.apache.pdfbox.pdmodel.PDPageContentStream
@@ -26,12 +28,14 @@ class PdfBookParserTest {
     private class FakePdf(
         private val pages: List<String>,
         private val entries: List<PdfOutlineEntry> = emptyList(),
+        private val pictures: Map<Int, List<PdfPageImage>> = emptyMap(),
     ) : PdfTextSource {
         override val pageCount: Int get() = pages.size
         override val title: String? get() = "Fake"
         override val author: String? get() = "Tester"
         override fun pageText(pageIndex: Int): String = pages[pageIndex]
         override fun outline(): List<PdfOutlineEntry> = entries
+        override fun pageImages(pageIndex: Int): List<PdfPageImage> = pictures[pageIndex].orEmpty()
     }
 
     private fun page(number: Int, paragraph: String = "Body text for page $number.") =
@@ -64,6 +68,44 @@ class PdfBookParserTest {
         assertEquals("Pages 1\u201310", parsed.chapters[0].title)
         assertEquals("Pages 11\u201320", parsed.chapters[1].title)
         assertEquals("Pages 21\u201325", parsed.chapters[2].title)
+    }
+
+    @Test
+    fun `pictures on a page follow that page's text and tiny marks are skipped`() {
+        val pages = listOf(page(0, "Text of the first page, which mentions a figure."), page(1))
+        val source = FakePdf(
+            pages,
+            pictures = mapOf(
+                0 to listOf(
+                    PdfPageImage(600, 400, "pdf-page1-0.jpg", byteArrayOf(1, 2, 3)),
+                    PdfPageImage(40, 40, "pdf-page1-1.jpg", byteArrayOf(4, 5, 6)),
+                ),
+            ),
+        )
+
+        val parsed = PdfBookParser.parse(source)
+        val blocks = parsed.chapters.single().blocks
+
+        assertEquals(BlockType.PARAGRAPH, blocks.first().type)
+        assertEquals(BlockType.IMAGE, blocks[1].type)
+        assertEquals("pdf-page1-0.jpg", blocks[1].imageRef)
+        assertEquals(setOf("pdf-page1-0.jpg"), parsed.illustrations.keys)
+    }
+
+    @Test
+    fun `a picture drawn on several pages is kept once`() {
+        val pages = (0 until 4).map { page(it) }
+        val repeated = PdfPageImage(500, 500, "pdf-page1-0.jpg", byteArrayOf(9))
+        val source = FakePdf(
+            pages,
+            pictures = mapOf(0 to listOf(repeated), 2 to listOf(repeated, PdfPageImage(500, 500, "pdf-page3-1.jpg", byteArrayOf(8)))),
+        )
+
+        val parsed = PdfBookParser.parse(source, pagesPerChapter = 10)
+        val pictures = parsed.chapters.single().blocks.filter { it.type == BlockType.IMAGE }
+
+        assertEquals(listOf("pdf-page1-0.jpg", "pdf-page3-1.jpg"), pictures.map { it.imageRef })
+        assertEquals(2, parsed.illustrations.size)
     }
 
     @Test

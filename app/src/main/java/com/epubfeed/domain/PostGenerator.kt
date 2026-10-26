@@ -24,7 +24,9 @@ data class GeneratedPost(
  *  - the chapter always opens with a dedicated title post (the thread opener),
  *  - blocks are grouped greedily until the character budget is reached,
  *  - blocks are never cut in half: an oversized paragraph is split on sentence
- *    boundaries only, and a paragraph with no usable sentence boundary stays whole.
+ *    boundaries only, and a paragraph with no usable sentence boundary stays whole,
+ *  - a picture is always its own post, the way a photo lands on a timeline: it never
+ *    shares a post with the prose around it.
  */
 @Singleton
 class PostGenerator @Inject constructor() {
@@ -72,6 +74,19 @@ class PostGenerator @Inject constructor() {
         }
 
         for (unit in units) {
+            if (unit.block.type == BlockType.IMAGE) {
+                flush()
+                out += GeneratedPost(
+                    indexInChapter = out.size,
+                    isChapterTitlePost = false,
+                    blocks = listOf(unit.block),
+                    firstBlock = unit.sourceIndex,
+                    lastBlock = unit.sourceIndex,
+                    // A picture post carries no prose, so it adds no words to the book either.
+                    plainText = "",
+                )
+                continue
+            }
             val cost = unit.length
             if (current.isNotEmpty() && currentChars + cost > budget) flush()
             current += unit

@@ -33,7 +33,7 @@ import com.epubfeed.ui.theme.LocalXColors
 fun PinnedWelcomePost(
     displayName: String,
     handle: String,
-    coverPath: String?,
+    avatarPath: String?,
     hue: Int,
     onAddBook: () -> Unit,
     modifier: Modifier = Modifier,
@@ -57,7 +57,7 @@ fun PinnedWelcomePost(
         }
         Spacer(Modifier.height(10.dp))
         Row {
-            BookAvatar(coverPath = coverPath, title = displayName, hue = hue, size = 40.dp)
+            BookAvatar(avatarPath = avatarPath, title = displayName, hue = hue, size = 40.dp)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -82,16 +82,16 @@ fun PinnedWelcomePost(
                 }
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "Welcome to Epub Feed. This is Pride and Prejudice, split into a timeline: " +
-                        "every chapter is a thread, every paragraph a post.",
+                    text = "Welcome to ePUB Feed. This is $displayName, split into a timeline, " +
+                        "where every chapter is a thread and every paragraph a post.",
                     color = x.text,
                     fontSize = 15.sp,
                     lineHeight = 20.sp,
                 )
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    text = "Tap + to import your own EPUB or PDF, tap the avatar to switch books, " +
-                        "and tap Aa to change the type, the post length and the theme.",
+                    text = "Tap the button below to import your own EPUB or PDF, tap the cover to switch " +
+                        "books, and tap the gear for type, post length and theme.",
                     color = x.text,
                     fontSize = 15.sp,
                     lineHeight = 20.sp,

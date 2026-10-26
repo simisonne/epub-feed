@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -29,11 +30,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarDuration
@@ -41,7 +40,6 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -54,8 +52,10 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -71,6 +71,8 @@ import com.epubfeed.ui.components.BookAvatar
 import com.epubfeed.ui.components.PostCard
 import com.epubfeed.ui.components.PinnedWelcomePost
 import com.epubfeed.ui.drawer.LibraryDrawer
+import com.epubfeed.ui.drawer.LibraryDrawerLayout
+import com.epubfeed.ui.drawer.LibraryDrawerState
 import com.epubfeed.ui.settings.SettingsActions
 import com.epubfeed.ui.settings.SettingsSheet
 import com.epubfeed.ui.theme.LocalXColors
@@ -97,7 +99,7 @@ fun FeedScreen(
     @Suppress("DEPRECATION") val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
-    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val drawerState = remember { LibraryDrawerState() }
     val listState = rememberLazyListState()
     val pagerState = rememberPagerState(initialPage = 0) { FeedTabs.size }
 
@@ -129,7 +131,7 @@ fun FeedScreen(
     }
 
     BackHandler(enabled = drawerState.isOpen) {
-        scope.launch { drawerState.close() }
+        drawerState.isOpen = false
     }
 
     val book = ui.book
@@ -162,22 +164,25 @@ fun FeedScreen(
         viewModel.onReadingInteraction()
     }
 
-    ModalNavigationDrawer(
-        drawerState = drawerState,
-        scrimColor = Color.Black.copy(alpha = 0.6f),
+    // Coming back from the profile rebuilds the list, so ask for the place again.
+    LaunchedEffect(Unit) { viewModel.restorePositionIfNeeded() }
+
+    LibraryDrawerLayout(
+        state = drawerState,
         drawerContent = {
             LibraryDrawer(
                 books = ui.books,
                 currentBookId = book?.id,
                 onSelect = { selected ->
-                    scope.launch { drawerState.close() }
+                    drawerState.isOpen = false
                     if (selected.id != book?.id) viewModel.switchToBook(selected)
                 },
                 onAddBook = {
-                    scope.launch { drawerState.close() }
+                    drawerState.isOpen = false
                     picker.launch(MIME_TYPES)
                 },
                 onDelete = { target -> viewModel.deleteBook(target) },
+                onMove = { ids -> viewModel.moveBooks(ids) },
             )
         },
     ) {
@@ -198,7 +203,7 @@ fun FeedScreen(
                 FeedTopBar(
                     title = book?.title ?: "ePUB Feed",
                     author = book?.author.orEmpty(),
-                    coverPath = book?.coverPath,
+                    avatarPath = book?.avatarSource,
                     hue = book?.hue ?: 210,
                     progress = if (book != null && book.postCount > 0) {
                         (ui.currentIndex + 1).toFloat() / book.postCount
@@ -206,7 +211,7 @@ fun FeedScreen(
                         0f
                     },
                     selectedTab = pagerState.currentPage,
-                    onAvatarClick = { scope.launch { drawerState.open() } },
+                    onAvatarClick = { drawerState.isOpen = true },
                     onSettingsClick = { showSettings = true },
                     onTabSelected = { selected ->
                         viewModel.onReadingInteraction()
@@ -248,18 +253,17 @@ fun FeedScreen(
                                 notes = ui.notes,
                                 book = book,
                                 displayName = book.title,
-                                handle = handleFor(book.author),
+                                handle = book.displayHandle,
                                 readingSize = readingSize,
                                 readingFamily = readingFamily,
-                                totalPosts = ui.totalPosts,
                                 pinnedVisible = pinnedVisible,
                                 leading = leading,
                                 listState = listState,
                                 chapterTitle = ui.chapterTitle,
                                 chapterIndex = ui.chapterIndex,
                                 hasNextChapter = ui.hasNextChapter,
-                                nextChapterTitle = ui.chapters.getOrNull(ui.chapterIndex + 1)?.title,
                                 scrollTarget = ui.scrollTarget,
+                                postsMatchChapter = ui.postsMatchChapter,
                                 onVisibleListIndex = viewModel::onVisibleListIndex,
                                 onConsumeScrollTarget = viewModel::consumeScrollTarget,
                                 onInteraction = viewModel::onReadingInteraction,
@@ -283,6 +287,7 @@ fun FeedScreen(
                                     viewModel.openPost(firstIndex)
                                     scope.launch { pagerState.animateScrollToPage(0) }
                                 },
+                                onUnmark = { chapter -> viewModel.unmarkChapter(chapter) },
                             )
                             else -> CollectionPage(
                                 liked = page == 2,
@@ -291,10 +296,10 @@ fun FeedScreen(
                                 notes = ui.notes,
                                 book = book,
                                 displayName = book.title,
-                                handle = handleFor(book.author),
+                                handle = book.displayHandle,
                                 readingSize = readingSize,
                                 readingFamily = readingFamily,
-                                totalPosts = ui.totalPosts,
+                                chapters = ui.chapters,
                                 onLike = { viewModel.toggleLike(it) },
                                 onBookmark = { viewModel.toggleBookmark(it) },
                                 onComment = { noteTarget = it },
@@ -328,6 +333,9 @@ fun FeedScreen(
                         )
                     }
                 }
+
+                // The library opens from a swipe in from the left. The band starts where the
+                // system back gesture ends, because that strip belongs to Android, not the app.
             }
         }
     }
@@ -344,7 +352,7 @@ fun FeedScreen(
         NoteComposer(
             post = post,
             displayName = book?.title.orEmpty(),
-            coverPath = book?.coverPath,
+            avatarPath = book?.avatarSource,
             hue = book?.hue ?: 210,
             existing = ui.notes[post.id].orEmpty(),
             onDismiss = { noteTarget = null },
@@ -397,15 +405,14 @@ private fun ChapterFeed(
     handle: String,
     readingSize: androidx.compose.ui.unit.TextUnit,
     readingFamily: androidx.compose.ui.text.font.FontFamily,
-    totalPosts: Int,
     pinnedVisible: Boolean,
     leading: Int,
     listState: androidx.compose.foundation.lazy.LazyListState,
     chapterTitle: String,
     chapterIndex: Int,
     hasNextChapter: Boolean,
-    nextChapterTitle: String?,
     scrollTarget: Int?,
+    postsMatchChapter: Boolean,
     onVisibleListIndex: (Int) -> Unit,
     onConsumeScrollTarget: () -> Unit,
     onInteraction: () -> Unit,
@@ -432,7 +439,7 @@ private fun ChapterFeed(
                 PinnedWelcomePost(
                     displayName = displayName,
                     handle = handle,
-                    coverPath = book.coverPath,
+                    avatarPath = book.avatarSource,
                     hue = book.hue,
                     onAddBook = onAddBook,
                 )
@@ -446,13 +453,13 @@ private fun ChapterFeed(
                 post = post,
                 displayName = displayName,
                 handle = handle,
-                coverPath = book.coverPath,
+                avatarPath = book.avatarSource,
                 hue = book.hue,
                 showThreadLine = next != null,
                 showChapterDivider = previous != null,
                 readingFontSize = readingSize,
                 readingFontFamily = readingFamily,
-                viewsLabel = percentLabel(post.globalIndex, totalPosts),
+                viewsLabel = percentLabel(post, posts.size),
                 notes = notes[post.id].orEmpty(),
                 onLike = { onLike(post) },
                 onBookmark = { onBookmark(post) },
@@ -469,30 +476,33 @@ private fun ChapterFeed(
             ChapterFooter(
                 chapterTitle = chapterTitle,
                 hasNextChapter = hasNextChapter,
-                nextChapterTitle = nextChapterTitle,
                 onNextChapter = onNextChapter,
             )
         }
     }
 
     // Report the top visible post, and treat scrolling as reading activity.
-    LaunchedEffect(listState) {
+    LaunchedEffect(listState, postsMatchChapter) {
         snapshotFlow { listState.firstVisibleItemIndex to listState.isScrollInProgress }
             .distinctUntilChanged()
             .collect { (index, scrolling) ->
                 if (scrolling) onInteraction()
-                onVisibleListIndex(index - leading)
+                // The list can still be the previous chapter: its posts are not this book's.
+                if (postsMatchChapter) onVisibleListIndex(index - leading)
             }
     }
 
     // Put the reader back where they were: the target is a global post index.
-    LaunchedEffect(scrollTarget, posts.firstOrNull()?.id, posts.size, leading) {
+    LaunchedEffect(scrollTarget, posts.firstOrNull()?.id, posts.size, postsMatchChapter, leading) {
         val target = scrollTarget ?: return@LaunchedEffect
         if (posts.isEmpty()) return@LaunchedEffect
-        val index = posts.indexOfFirst { it.globalIndex >= target }.let { if (it < 0) 0 else it }
+        // Right after a book or chapter switch this list is still the previous chapter. Scrolling
+        // it lands at its top and releases the target, so the reader ends up at the top of the
+        // right chapter with the place forgotten. Wait for the list the target lives in.
+        if (!postsMatchChapter) return@LaunchedEffect
         // The first post of the sample book sits under the pinned welcome post: park on the
         // welcome post there, and offset by it everywhere else.
-        val listIndex = if (index == 0) 0 else index + leading
+        val listIndex = restoreListIndex(posts, target, leading) ?: return@LaunchedEffect
         listState.scrollToItem(listIndex)
         withTimeoutOrNull(1_500) {
             snapshotFlow { listState.firstVisibleItemIndex }.first { it >= listIndex }
@@ -512,7 +522,7 @@ private fun CollectionPage(
     handle: String,
     readingSize: androidx.compose.ui.unit.TextUnit,
     readingFamily: androidx.compose.ui.text.font.FontFamily,
-    totalPosts: Int,
+    chapters: List<com.epubfeed.domain.model.ChapterSummary>,
     onLike: (FeedPost) -> Unit,
     onBookmark: (FeedPost) -> Unit,
     onComment: (FeedPost) -> Unit,
@@ -529,11 +539,11 @@ private fun CollectionPage(
             notes = notes,
             displayName = displayName,
             handle = handle,
-            coverPath = book.coverPath,
+            avatarPath = book.avatarSource,
             hue = book.hue,
             readingFontSize = readingSize,
             readingFontFamily = readingFamily,
-            totalPosts = totalPosts,
+            chapters = chapters,
             onLike = onLike,
             onBookmark = onBookmark,
             onComment = onComment,
@@ -550,11 +560,11 @@ private fun CollectionPage(
             notes = notes,
             displayName = displayName,
             handle = handle,
-            coverPath = book.coverPath,
+            avatarPath = book.avatarSource,
             hue = book.hue,
             readingFontSize = readingSize,
             readingFontFamily = readingFamily,
-            totalPosts = totalPosts,
+            chapters = chapters,
             onLike = onLike,
             onBookmark = onBookmark,
             onComment = onComment,
@@ -572,7 +582,6 @@ private fun CollectionPage(
 private fun ChapterFooter(
     chapterTitle: String,
     hasNextChapter: Boolean,
-    nextChapterTitle: String?,
     onNextChapter: () -> Unit,
 ) {
     val x = LocalXColors.current
@@ -583,12 +592,6 @@ private fun ChapterFooter(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         if (hasNextChapter) {
-            Text(
-                text = "You finished this chapter",
-                color = x.muted,
-                fontSize = 13.sp,
-            )
-            Spacer(Modifier.height(10.dp))
             Box(
                 modifier = Modifier
                     .clickable(onClick = onNextChapter)
@@ -600,14 +603,6 @@ private fun ChapterFooter(
                     color = Color.White,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
-                )
-            }
-            if (!nextChapterTitle.isNullOrBlank()) {
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    text = "Up next: $nextChapterTitle",
-                    color = x.muted,
-                    fontSize = 13.sp,
                 )
             }
         } else {
@@ -645,7 +640,7 @@ private fun EmptyLibraryState(onAddBook: () -> Unit) {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        BookAvatar(coverPath = null, title = "E", hue = 210, size = 64.dp)
+        BookAvatar(avatarPath = null, title = "E", hue = 210, size = 64.dp)
         Spacer(Modifier.height(20.dp))
         Text(
             text = "Your library is empty",
@@ -655,7 +650,7 @@ private fun EmptyLibraryState(onAddBook: () -> Unit) {
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            text = "Import an EPUB or a PDF and it becomes a timeline: chapters turn into threads, paragraphs into posts.",
+            text = "Import an EPUB or a PDF and it becomes a timeline, where chapters turn into threads and paragraphs into posts.",
             color = x.muted,
             fontSize = 15.sp,
             lineHeight = 20.sp,
@@ -670,13 +665,6 @@ private fun EmptyLibraryState(onAddBook: () -> Unit) {
             Text("Add a book", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
         }
     }
-}
-
-fun handleFor(author: String): String {
-    val slug = author.lowercase()
-        .replace(Regex("[^a-z0-9]+"), "_")
-        .trim('_')
-    return slug.ifBlank { "unknown" }.take(20)
 }
 
 fun shareText(post: FeedPost, author: String, title: String): String {

@@ -1,18 +1,25 @@
 package com.epubfeed.data.pdf
 
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import com.epubfeed.data.image.PictureFilter
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.encryption.InvalidPasswordException
+import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
 import com.tom_roush.pdfbox.pdmodel.interactive.action.PDActionGoTo
 import com.tom_roush.pdfbox.pdmodel.interactive.documentnavigation.destination.PDPageDestination
 import com.tom_roush.pdfbox.pdmodel.interactive.documentnavigation.outline.PDDocumentOutline
 import com.tom_roush.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineItem
 import com.tom_roush.pdfbox.text.PDFTextStripper
+import java.io.ByteArrayOutputStream
 import java.io.File
 
 /**
  * PDFBox backed text source. Android's PdfRenderer can only draw bitmaps, so text
- * extraction goes through pdfbox-android instead.
+ * extraction goes through pdfbox-android instead, and pictures come out of the page's
+ * own image objects.
  */
 class PdfBoxTextSource private constructor(private val document: PDDocument) : PdfTextSource, AutoCloseable {
 
@@ -33,6 +40,54 @@ class PdfBoxTextSource private constructor(private val document: PDDocument) : P
         stripper.endPage = pageIndex + 1
         stripper.lineSeparator = "\n"
         return stripper.getText(document)
+    }
+
+    /**
+     * The pictures drawn on one page. Marks and ornaments are dropped by size, huge images are
+     * skipped so a print resolution plate cannot exhaust the heap, and everything kept is scaled
+     * down and re-encoded, which also flattens transparency onto white.
+     */
+    override fun pageImages(pageIndex: Int): List<PdfPageImage> {
+        val page: PDPage = runCatching { document.getPage(pageIndex) }.getOrNull() ?: return emptyList()
+        val resources = runCatching { page.resources }.getOrNull() ?: return emptyList()
+        val names = runCatching { resources.xObjectNames }.getOrNull() ?: return emptyList()
+
+        val out = ArrayList<PdfPageImage>()
+        var slot = 0
+        for (name in names) {
+            if (out.size >= MAX_PICTURES_PER_PAGE) break
+            val xObject = runCatching { resources.getXObject(name) }.getOrNull() ?: continue
+            if (xObject !is PDImageXObject) continue
+            val width = runCatching { xObject.width }.getOrDefault(0)
+            val height = runCatching { xObject.height }.getOrDefault(0)
+            if (!PictureFilter.qualifies(width, height)) continue
+            if (width.toLong() * height > MAX_SOURCE_PIXELS) continue
+            val bitmap = runCatching { xObject.image }.getOrNull() ?: continue
+            val encoded = runCatching { encodeJpeg(bitmap) }.getOrNull() ?: continue
+            out += PdfPageImage(
+                width = encoded.first,
+                height = encoded.second,
+                key = "pdf-page${pageIndex + 1}-$slot.jpg",
+                bytes = encoded.third,
+            )
+            slot++
+        }
+        return out
+    }
+
+    /** Scales the picture down to a sane width and writes it as JPEG on white. */
+    private fun encodeJpeg(source: Bitmap): Triple<Int, Int, ByteArray>? {
+        val scale = if (source.width > MAX_STORED_WIDTH) MAX_STORED_WIDTH.toFloat() / source.width else 1f
+        val width = (source.width * scale).toInt().coerceAtLeast(1)
+        val height = (source.height * scale).toInt().coerceAtLeast(1)
+        val flat = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        Canvas(flat).apply {
+            drawColor(Color.WHITE)
+            drawBitmap(source, null, android.graphics.Rect(0, 0, width, height), null)
+        }
+        val out = ByteArrayOutputStream()
+        if (!flat.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)) return null
+        return Triple(width, height, out.toByteArray())
     }
 
     override fun outline(): List<PdfOutlineEntry> {
@@ -89,6 +144,11 @@ class PdfBoxTextSource private constructor(private val document: PDDocument) : P
     }
 
     companion object {
+        private const val MAX_PICTURES_PER_PAGE = 20
+        private const val MAX_SOURCE_PIXELS = 24_000_000L
+        private const val MAX_STORED_WIDTH = 1600
+        private const val JPEG_QUALITY = 85
+
         fun open(file: File): PdfBoxTextSource {
             val document = try {
                 PDDocument.load(file)

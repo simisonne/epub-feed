@@ -29,7 +29,10 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -71,7 +74,7 @@ fun PostCard(
     post: FeedPost,
     displayName: String,
     handle: String,
-    coverPath: String?,
+    avatarPath: String?,
     hue: Int,
     showThreadLine: Boolean,
     showChapterDivider: Boolean,
@@ -94,6 +97,8 @@ fun PostCard(
     val haptics = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
     val likeScale = remember { Animatable(1f) }
+    // Tapping a picture in the post opens it full screen, like a photo on X.
+    var openPhoto by remember { mutableStateOf<String?>(null) }
 
     Column(modifier.fillMaxWidth()) {
         if (showChapterDivider) {
@@ -122,7 +127,7 @@ fun PostCard(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 BookAvatar(
-                    coverPath = coverPath,
+                    avatarPath = avatarPath,
                     title = displayName,
                     hue = hue,
                     size = AvatarSize,
@@ -160,6 +165,7 @@ fun PostCard(
                     fontSize = readingFontSize,
                     fontFamily = readingFontFamily,
                     isChapterTitlePost = post.isChapterTitlePost,
+                    onImageClick = { path -> openPhoto = path },
                 )
                 Spacer(Modifier.height(8.dp))
                 ActionRow(
@@ -189,6 +195,10 @@ fun PostCard(
             }
         }
     }
+
+    openPhoto?.let { path ->
+        PhotoViewer(path = path, onDismiss = { openPhoto = null })
+    }
 }
 
 @Composable
@@ -202,15 +212,8 @@ private fun NoteBubble(note: Note, onDelete: () -> Unit) {
             .background(x.elevated)
             .padding(start = 10.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
     ) {
-        Box(
-            modifier = Modifier
-                .size(22.dp)
-                .clip(CircleShape)
-                .background(x.accent),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text("Y", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-        }
+        // The reader's own picture is the app itself.
+        EpubFeedAvatar(size = 22.dp)
         Spacer(Modifier.width(8.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -282,6 +285,7 @@ private fun PostBody(
     fontSize: TextUnit,
     fontFamily: FontFamily,
     isChapterTitlePost: Boolean,
+    onImageClick: (String) -> Unit,
 ) {
     val x = LocalXColors.current
     val lineHeight = fontSize * 1.38f
@@ -307,6 +311,18 @@ private fun PostBody(
                     fontWeight = if (isChapterTitlePost) FontWeight.SemiBold else FontWeight.Normal,
                     fontFamily = fontFamily,
                 )
+                BlockType.IMAGE -> {
+                    val path = block.imageRef
+                    if (path != null) {
+                        Illustration(
+                            path = path,
+                            alt = block.imageAlt,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(onClickLabel = "Open photo full screen") { onImageClick(path) },
+                        )
+                    }
+                }
             }
         }
     }
@@ -390,7 +406,7 @@ private fun ActionRow(
         ActionCell(
             icon = FeedIcons.Views,
             label = viewsLabel,
-            contentDescription = "Views, $viewsLabel of the book read",
+            contentDescription = "Views, $viewsLabel through this chapter",
             tint = x.muted,
         )
         ActionCell(

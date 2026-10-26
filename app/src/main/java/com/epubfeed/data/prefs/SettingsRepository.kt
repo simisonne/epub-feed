@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.epubfeed.domain.model.CollectionOrder
 import com.epubfeed.domain.model.PostLength
 import com.epubfeed.domain.model.ReadingFont
 import com.epubfeed.domain.model.ReadingTextSize
@@ -29,6 +30,7 @@ class SettingsRepository @Inject constructor(@param:ApplicationContext private v
         val FONT = stringPreferencesKey("font")
         val TEXT_SIZE = stringPreferencesKey("text_size")
         val POST_LENGTH = stringPreferencesKey("post_length")
+        val COLLECTION_ORDER = stringPreferencesKey("collection_order")
         val LAST_BOOK = stringPreferencesKey("last_book")
         val SEED_DONE = intPreferencesKey("seed_done")
     }
@@ -39,6 +41,7 @@ class SettingsRepository @Inject constructor(@param:ApplicationContext private v
             readingFont = prefs[Keys.FONT].toEnumOrDefault(ReadingFont.SANS),
             textSize = prefs[Keys.TEXT_SIZE].toEnumOrDefault(ReadingTextSize.MEDIUM),
             postLength = PostLength.fromName(prefs[Keys.POST_LENGTH]),
+            collectionOrder = prefs[Keys.COLLECTION_ORDER].toEnumOrDefault(CollectionOrder.FIRST_TO_LAST),
         )
     }
 
@@ -56,17 +59,20 @@ class SettingsRepository @Inject constructor(@param:ApplicationContext private v
 
     suspend fun setPostLength(length: PostLength) = putString(Keys.POST_LENGTH, length.name)
 
+    suspend fun setCollectionOrder(order: CollectionOrder) = putString(Keys.COLLECTION_ORDER, order.name)
+
     suspend fun setLastBookId(bookId: String?) {
         context.dataStore.edit { prefs ->
             if (bookId == null) prefs.remove(Keys.LAST_BOOK) else prefs[Keys.LAST_BOOK] = bookId
         }
     }
 
-    suspend fun setSeedDone() {
-        context.dataStore.edit { it[Keys.SEED_DONE] = 1 }
-    }
+    /** Which bundled sample has been seeded; 0 means nothing has been seeded yet. */
+    suspend fun seedVersion(): Int = context.dataStore.data.map { it[Keys.SEED_DONE] ?: 0 }.first()
 
-    suspend fun isSeedDone(): Boolean = context.dataStore.data.map { it[Keys.SEED_DONE] == 1 }.first()
+    suspend fun setSeedVersion(version: Int) {
+        context.dataStore.edit { it[Keys.SEED_DONE] = version }
+    }
 
     private suspend fun putString(key: Preferences.Key<String>, value: String) {
         context.dataStore.edit { it[key] = value }

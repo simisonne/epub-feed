@@ -3,6 +3,7 @@ package com.epubfeed.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.epubfeed.data.prefs.SettingsRepository
+import com.epubfeed.domain.model.CollectionOrder
 import com.epubfeed.domain.model.PostLength
 import com.epubfeed.domain.model.ReadingFont
 import com.epubfeed.domain.model.ReadingTextSize
@@ -38,5 +39,9 @@ class AppSettingsViewModel @Inject constructor(
 
     fun setPostLength(length: PostLength) {
         viewModelScope.launch { settingsRepository.setPostLength(length) }
+    }
+
+    fun setCollectionOrder(order: CollectionOrder) {
+        viewModelScope.launch { settingsRepository.setCollectionOrder(order) }
     }
 }

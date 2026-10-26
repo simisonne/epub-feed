@@ -9,10 +9,11 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface BookDao {
 
-    @Query("SELECT * FROM books ORDER BY importedAt ASC")
+    /** The library order the reader dragged into place, with the import date as the tie break. */
+    @Query("SELECT * FROM books ORDER BY libraryOrder ASC, importedAt ASC")
     fun observeAll(): Flow<List<BookEntity>>
 
-    @Query("SELECT * FROM books ORDER BY importedAt ASC")
+    @Query("SELECT * FROM books ORDER BY libraryOrder ASC, importedAt ASC")
     suspend fun all(): List<BookEntity>
 
     @Query("SELECT * FROM books WHERE id = :id")
@@ -23,6 +24,9 @@ interface BookDao {
 
     @Query("SELECT COUNT(*) FROM books")
     suspend fun count(): Int
+
+    @Query("SELECT COALESCE(MAX(libraryOrder), -1) FROM books")
+    suspend fun maxLibraryOrder(): Int
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(book: BookEntity)
@@ -44,4 +48,14 @@ interface BookDao {
             "lastPostIndex = :position WHERE id = :id",
     )
     suspend fun updateStructure(id: String, posts: Int, chapters: Int, words: Int, position: Int)
+
+    /** The profile edits: the name, the author and the @ the reader wants to see. */
+    @Query("UPDATE books SET title = :title, author = :author, handle = :handle WHERE id = :id")
+    suspend fun updateIdentity(id: String, title: String, author: String, handle: String?)
+
+    @Query("UPDATE books SET avatarPath = :path WHERE id = :id")
+    suspend fun updateAvatar(id: String, path: String?)
+
+    @Query("UPDATE books SET libraryOrder = :order WHERE id = :id")
+    suspend fun updateLibraryOrder(id: String, order: Int)
 }

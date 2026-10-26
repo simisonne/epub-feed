@@ -13,14 +13,24 @@ data class Run(
 )
 
 @Serializable
-enum class BlockType { PARAGRAPH, QUOTE, HEADING }
+enum class BlockType { PARAGRAPH, QUOTE, HEADING, IMAGE }
 
-/** A block level unit of chapter content: a paragraph, a quote (rendered as an X quote card) or a heading. */
+/**
+ * A block level unit of chapter content: a paragraph, a quote (rendered as an X quote card),
+ * a heading, or a picture from the book (rendered as an X picture post).
+ */
 @Immutable
 @Serializable
 data class Block(
     val type: BlockType = BlockType.PARAGRAPH,
     val runs: List<Run> = emptyList(),
+    /**
+     * For [BlockType.IMAGE] only: where the picture lives. A ZIP entry name while the book is
+     * being parsed, an absolute file path once the import has written it to app storage.
+     */
+    val imageRef: String? = null,
+    /** For [BlockType.IMAGE] only: the book's own alternative text, when it shipped one. */
+    val imageAlt: String? = null,
 ) {
     val text: String get() = runs.joinToString("") { it.text }
     val isBlank: Boolean get() = text.isBlank()

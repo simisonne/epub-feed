@@ -1,5 +1,7 @@
 package com.epubfeed.ui.settings
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -7,6 +9,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -15,9 +18,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.epubfeed.domain.model.CollectionOrder
 import com.epubfeed.domain.model.PostLength
 import com.epubfeed.domain.model.ReadingFont
 import com.epubfeed.domain.model.ReadingTextSize
@@ -35,6 +40,7 @@ data class SettingsActions(
     val setFont: (ReadingFont) -> Unit,
     val setTextSize: (ReadingTextSize) -> Unit,
     val setPostLength: (PostLength) -> Unit,
+    val setCollectionOrder: (CollectionOrder) -> Unit,
 )
 
 /** The "Aa" sheet: type size, font, post length and theme. */
@@ -111,6 +117,20 @@ fun SettingsSheet(
             )
             SectionDivider()
 
+            SettingsSectionLabel("Likes and saves")
+            SegmentedOptions(
+                options = CollectionOrder.entries.toList(),
+                selected = settings.collectionOrder,
+                label = { order ->
+                    when (order) {
+                        CollectionOrder.FIRST_TO_LAST -> "First to last"
+                        CollectionOrder.LAST_TO_FIRST -> "Last to first"
+                    }
+                },
+                onSelect = actions.setCollectionOrder,
+            )
+            SectionDivider()
+
             SettingsSectionLabel("Theme")
             SegmentedOptions(
                 options = ThemeMode.entries.toList(),
@@ -126,20 +146,22 @@ fun SettingsSheet(
             )
 
             Spacer(Modifier.height(20.dp))
-            Text(
-                text = "Preview",
-                color = x.muted,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = "It is a truth universally acknowledged, that a single man in possession of a good fortune, must be in want of a wife.",
-                color = x.text,
-                fontSize = settings.textSize.sp.sp,
-                lineHeight = settings.textSize.sp.sp * 1.38f,
-                fontFamily = readingFontFamily(settings.readingFont),
-            )
+            // The sample sentence is the preview, no label needed.
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(x.elevated)
+                    .padding(14.dp),
+            ) {
+                Text(
+                    text = "It is a truth universally acknowledged, that a single man in possession of a good fortune, must be in want of a wife.",
+                    color = x.text,
+                    fontSize = settings.textSize.sp.sp,
+                    lineHeight = settings.textSize.sp.sp * 1.38f,
+                    fontFamily = readingFontFamily(settings.readingFont),
+                )
+            }
         }
     }
 }

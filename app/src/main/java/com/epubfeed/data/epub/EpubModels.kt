@@ -14,12 +14,18 @@ data class ParsedBook(
     val coverBytes: ByteArray?,
     val publisher: String? = null,
     val publishedYear: String? = null,
+    /**
+     * The pictures the chapters refer to, keyed by ZIP entry. The chapters hold those entry names
+     * in `Block.imageRef`; the import writes these bytes to app storage and swaps the names for
+     * file paths.
+     */
+    val illustrations: Map<String, ByteArray> = emptyMap(),
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is ParsedBook) return false
         return title == other.title && author == other.author && chapters == other.chapters &&
-            coverBytes.contentEquals(other.coverBytes)
+            coverBytes.contentEquals(other.coverBytes) && illustrations.keys == other.illustrations.keys
     }
 
     override fun hashCode(): Int {
@@ -27,6 +33,7 @@ data class ParsedBook(
         result = 31 * result + author.hashCode()
         result = 31 * result + chapters.hashCode()
         result = 31 * result + (coverBytes?.contentHashCode() ?: 0)
+        result = 31 * result + illustrations.keys.hashCode()
         return result
     }
 }

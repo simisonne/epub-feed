@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
@@ -66,7 +65,7 @@ private const val NOTE_LIMIT = 280
 fun NoteComposer(
     post: FeedPost,
     displayName: String,
-    coverPath: String?,
+    avatarPath: String?,
     hue: Int,
     existing: List<Note>,
     onDismiss: () -> Unit,
@@ -143,7 +142,7 @@ fun NoteComposer(
             ) {
                 Row {
                     BookAvatar(
-                        coverPath = coverPath,
+                        avatarPath = avatarPath,
                         title = displayName,
                         hue = hue,
                         size = 40.dp,
@@ -180,44 +179,33 @@ fun NoteComposer(
 
                 Spacer(Modifier.height(14.dp))
 
-                Row {
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .background(x.elevated, CircleShape),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text("Y", color = x.accent, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Box(Modifier.weight(1f).padding(top = 8.dp)) {
-                        if (value.text.isEmpty()) {
-                            Text(
-                                text = "Post your note",
-                                color = x.muted,
-                                fontSize = 17.sp,
-                            )
-                        }
-                        BasicTextField(
-                            value = value,
-                            onValueChange = { next ->
-                                value = if (next.text.length > NOTE_LIMIT) {
-                                    TextFieldValue(next.text.take(NOTE_LIMIT), TextRange(next.text.take(NOTE_LIMIT).length))
-                                } else {
-                                    next
-                                }
-                            },
-                            textStyle = androidx.compose.ui.text.TextStyle(
-                                color = x.text,
-                                fontSize = 17.sp,
-                                lineHeight = 23.sp,
-                            ),
-                            cursorBrush = SolidColor(x.accent),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .focusRequester(focus),
+                Box(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                    if (value.text.isEmpty()) {
+                        Text(
+                            text = "Post your note",
+                            color = x.muted,
+                            fontSize = 17.sp,
                         )
                     }
+                    BasicTextField(
+                        value = value,
+                        onValueChange = { next ->
+                            value = if (next.text.length > NOTE_LIMIT) {
+                                TextFieldValue(next.text.take(NOTE_LIMIT), TextRange(next.text.take(NOTE_LIMIT).length))
+                            } else {
+                                next
+                            }
+                        },
+                        textStyle = androidx.compose.ui.text.TextStyle(
+                            color = x.text,
+                            fontSize = 17.sp,
+                            lineHeight = 23.sp,
+                        ),
+                        cursorBrush = SolidColor(x.accent),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .focusRequester(focus),
+                    )
                 }
 
                 Spacer(Modifier.height(10.dp))
@@ -246,15 +234,6 @@ fun NoteComposer(
                     existing.forEach { note ->
                         Column(Modifier.padding(top = 10.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(20.dp)
-                                        .background(x.accent, CircleShape),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Text("Y", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                }
-                                Spacer(Modifier.width(6.dp))
                                 Text("You", color = x.text, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                                 Text(" \u00B7 ${relativeTime(note.createdAt)}", color = x.muted, fontSize = 12.sp)
                             }
@@ -263,7 +242,7 @@ fun NoteComposer(
                                 color = x.text,
                                 fontSize = 15.sp,
                                 lineHeight = 20.sp,
-                                modifier = Modifier.padding(start = 26.dp, top = 2.dp),
+                                modifier = Modifier.padding(top = 2.dp),
                             )
                         }
                     }

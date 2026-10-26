@@ -36,12 +36,12 @@ private object CoverCache {
 }
 
 /**
- * A book's avatar: the cover art when the EPUB shipped one, otherwise a coloured
- * circle with the title's initial, like an X account with no profile photo.
+ * A book's avatar: the picture the reader chose for it, the cover art when the book shipped one,
+ * otherwise a coloured circle with the title's initial, like an X account with no profile photo.
  */
 @Composable
 fun BookAvatar(
-    coverPath: String?,
+    avatarPath: String?,
     title: String,
     hue: Int,
     size: Dp,
@@ -50,13 +50,19 @@ fun BookAvatar(
 ) {
     val density = LocalDensity.current
     val px = with(density) { size.roundToPx() }.coerceAtLeast(1)
-    val cacheKey = "${coverPath ?: "none"}-$px"
-    val bitmap by produceState(initialValue = CoverCache.cache.get(cacheKey), coverPath, px) {
-        if (value == null && coverPath != null) {
-            val loaded = withContext(Dispatchers.IO) { decodeSampled(coverPath, px) }
-            if (loaded != null) CoverCache.cache.put(cacheKey, loaded)
-            value = loaded
+    val cacheKey = "${avatarPath ?: "none"}-$px"
+    // The producer restarts when the book changes but its state keeps the previous value, so
+    // the new key has to overwrite it or the avatar keeps showing the last book's cover.
+    val bitmap by produceState(initialValue = CoverCache.cache.get(cacheKey), avatarPath, px) {
+        val cached = CoverCache.cache.get(cacheKey)
+        if (cached != null || avatarPath == null) {
+            value = cached
+            return@produceState
         }
+        value = null
+        val loaded = withContext(Dispatchers.IO) { decodeSampled(avatarPath, px) }
+        if (loaded != null) CoverCache.cache.put(cacheKey, loaded)
+        value = loaded
     }
 
     val semantics = if (contentDescription == null) Modifier else Modifier.semantics {
