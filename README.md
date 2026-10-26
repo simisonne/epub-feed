@@ -28,8 +28,9 @@ them, and when the chapter runs out a single blue button takes you to the next o
 **No network permission at all.** A book never leaves the device.
 
 <p align="center">
-  <img src="docs/screenshots/feed.png" width="300" alt="The feed, with the chapter title opening the thread">
-  <img src="docs/screenshots/chapter-end.png" width="300" alt="The end of a chapter, with the blue Go to next chapter button">
+  <img src="docs/screenshots/feed.png" width="310" alt="The feed, with the chapter title opening the thread">
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/chapter-end.png" width="310" alt="The end of a chapter, with the blue Go to next chapter button">
 </p>
 
 ## What it does
@@ -47,9 +48,13 @@ them, and when the chapter runs out a single blue button takes you to the next o
 | **Look and feel** | Lights out, Dim and Light themes, S, M and L text, serif or sans. |
 | **First launch** | **ePUB Feed Basics** is seeded on install, a six chapter book wearing the app icon as its cover that walks through every feature, so the app never opens on an empty screen. `python3 tools/make-sample-epub.py` regenerates it. |
 
-| Notes | Chapters | Profile |
-| :---: | :---: | :---: |
-| <img src="docs/screenshots/note.png" width="230" alt="A note under a post"> | <img src="docs/screenshots/chapters.png" width="230" alt="The Chapters tab with per chapter progress"> | <img src="docs/screenshots/profile.png" width="230" alt="The profile page of a book"> |
+<p align="center">
+  <img src="docs/screenshots/note.png" width="240" alt="A note under a post">
+  &nbsp;
+  <img src="docs/screenshots/chapters.png" width="240" alt="The Chapters tab with per chapter progress">
+  &nbsp;
+  <img src="docs/screenshots/profile.png" width="240" alt="The profile page of a book">
+</p>
 
 ## Install
 
