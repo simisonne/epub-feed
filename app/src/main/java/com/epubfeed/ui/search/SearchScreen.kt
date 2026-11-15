@@ -167,7 +167,7 @@ private fun SearchStatus(state: SearchViewModel.UiState) {
         result == null -> null
         result.hits.isEmpty() -> "No post holds those words."
         !result.everyTerm -> "No post holds every word. These hold at least one of them."
-        result.capped -> "${result.hits.size} posts, more than fit here shown"
+        result.capped -> "First ${result.hits.size} posts. Narrow the search to see the rest."
         result.hits.size == 1 -> "1 post"
         else -> "${result.hits.size} posts"
     }
