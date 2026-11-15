@@ -31,7 +31,9 @@ class ThesaurusRepository @Inject constructor(
                 val frequency = pack.frequency(candidate)
                 return LookupOutcome.Found(
                     ThesaurusEntry(
-                        term = display,
+                        // A Korean selection carries its particle; the word that answered is the one
+                        // the card and the saved row say.
+                        term = WordForms.shownTerm(display, candidate),
                         partOfSpeech = first.partOfSpeech,
                         definition = first.definition,
                         synonyms = first.synonyms,

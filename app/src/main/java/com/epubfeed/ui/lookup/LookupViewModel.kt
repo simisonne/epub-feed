@@ -46,7 +46,10 @@ class LookupViewModel @Inject constructor(
         _state.value = _state.value.copy(loading = true, outcome = null)
         viewModelScope.launch {
             val outcome = thesaurus.lookup(term)
-            val uses = book?.let { words.usesInBook(it.id, term) }
+            // Count with the form the dictionary answered, so a Korean noun counts every use even
+            // when the selection carried a particle.
+            val counted = (outcome as? LookupOutcome.Found)?.entry?.term ?: term
+            val uses = book?.let { words.usesInBook(it.id, counted) }
             _state.value = _state.value.copy(loading = false, outcome = outcome, uses = uses)
         }
     }

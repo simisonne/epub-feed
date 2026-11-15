@@ -16,6 +16,20 @@ class WordFormsTest {
             "She said it was ephemeral, and he agreed."
 
     @Test
+    fun `a korean selection is shown as the word that was looked up`() {
+        assertEquals("사랑", WordForms.shownTerm("사랑은", "사랑"))
+        // English keeps the form the reader chose.
+        assertEquals("houses", WordForms.shownTerm("houses", "house"))
+        assertEquals("사랑", WordForms.shownTerm("사랑", "사랑"))
+    }
+
+    @Test
+    fun `a korean noun counts every use, particle or not`() {
+        val text = "사랑은 마음속에서 자란다. 사랑이 있었고 사랑을 알았다."
+        assertEquals(3, WordForms.countUses(text, "사랑"))
+    }
+
+    @Test
     fun `a korean word keeps its meaning when the particle is stripped`() {
         assertTrue(WordForms.candidates("사랑은").contains("사랑"))
         assertTrue(WordForms.candidates("학교에서").contains("학교"))

@@ -75,8 +75,16 @@ object WordForms {
 
     fun containsWord(text: String, term: String): Boolean = termPattern(term).containsMatchIn(text)
 
-    private fun termPattern(term: String): Regex =
+    /**
+     * Korean has no spaces before its particles, so the end of a word is not a boundary there:
+     * "사랑" is used by every "사랑은", "사랑이" and "사랑을". Every other language matches whole
+     * words only, or "art" would count inside "earth".
+     */
+    private fun termPattern(term: String): Regex = if (isHangul(term)) {
+        Regex("(?<![\\p{L}])" + Regex.escape(term), RegexOption.IGNORE_CASE)
+    } else {
         Regex("(?<![\\p{L}])" + Regex.escape(term) + "(?![\\p{L}])", RegexOption.IGNORE_CASE)
+    }
 
     private val IRREGULAR = mapOf(
         "ran" to "run", "went" to "go", "gone" to "go", "better" to "good", "best" to "good",
@@ -114,7 +122,22 @@ object WordForms {
         "와", "과", "로", "나", "랑", "께", "다", "요", "고", "서", "며", "면", "지", "게", "기",
     ).sortedByDescending { it.length }
 
-    private fun isHangul(text: String): Boolean = text.any { it in '\uAC00'..'\uD7A3' }
+    fun isHangul(text: String): Boolean = text.any { it in '\uAC00'..'\uD7A3' }
+
+    /**
+     * What a selection should be called once it is looked up.
+     *
+     * Korean glues its particle onto the word, so a reader who selects "사랑은" is asking about
+     * "사랑". The entry that answered is that word, and the card, the saved row and the list all
+     * say it. English keeps what was selected, because "houses" is a word a reader chose to keep.
+     */
+    fun shownTerm(raw: String, matched: String): String {
+        val key = normalize(raw)
+        val selected = raw.trim()
+        if (key.isEmpty() || !isHangul(key)) return selected
+        if (matched == key || !key.startsWith(matched)) return selected
+        return matched
+    }
 
     /**
      * What the dictionary might actually hold, most likely first. A phrase falls back to its words
