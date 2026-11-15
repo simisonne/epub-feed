@@ -34,3 +34,12 @@ data class ReactionAnchor(
     val bookmarked: Boolean,
     val updatedAt: Long,
 )
+
+/** A post reduced to what a full text search needs. No blocks are parsed for a search. */
+data class SearchRow(
+    val id: String,
+    val chapterIndex: Int,
+    val indexInChapter: Int,
+    val globalIndex: Int,
+    val plainText: String,
+)

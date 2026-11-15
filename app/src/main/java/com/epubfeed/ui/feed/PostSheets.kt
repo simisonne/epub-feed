@@ -255,7 +255,7 @@ fun NoteComposer(
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
 }
 
-/** Long press on a post: the chapter tools, a note shortcut and copy. */
+/** Long press on a post: the chapter tools, a note, the dictionary and copy. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PostActionsSheet(
@@ -267,6 +267,8 @@ fun PostActionsSheet(
     onUnmark: () -> Unit,
     onCopy: () -> Unit,
     onNote: () -> Unit,
+    hasText: Boolean,
+    onLookUp: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val x = LocalXColors.current
@@ -320,6 +322,17 @@ fun PostActionsSheet(
                 icon = FeedIcons.Reply,
                 enabled = true,
                 onClick = onNote,
+            )
+            SheetAction(
+                title = "Look up a word",
+                subtitle = if (hasText) {
+                    "Check a word in this post"
+                } else {
+                    "This post has no text to look up"
+                },
+                icon = FeedIcons.Lookup,
+                enabled = hasText,
+                onClick = onLookUp,
             )
             SheetAction(
                 title = "Copy text",

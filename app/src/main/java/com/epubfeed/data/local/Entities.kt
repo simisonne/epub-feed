@@ -167,3 +167,50 @@ data class BookStatsEntity(
     @PrimaryKey val bookId: String,
     val secondsRead: Long,
 )
+
+/**
+ * A word the reader saved from the thesaurus.
+ *
+ * `bookId` is deliberately NOT a foreign key. Deleting a book cascades to its posts, notes and
+ * reactions, and the bundled sample book is deleted and reimported whenever its seed version
+ * changes, so a word saved from a sample or a removed book would go with it. The book title and
+ * hue are snapshotted here instead, and the word list keeps drawing them after the book is gone.
+ */
+@Entity(
+    tableName = "words",
+    indices = [
+        Index(value = ["termKey", "bookId"], unique = true),
+        Index("bookId"),
+        Index("createdAt"),
+    ],
+)
+data class WordEntity(
+    @PrimaryKey val id: String,
+    /** The word as it was saved, in the casing the reader selected. */
+    val term: String,
+    /** Lowercase form, the dedupe and lookup key. */
+    val termKey: String,
+    val definition: String,
+    /** "noun", "verb", ... when the source knew it. */
+    val partOfSpeech: String? = null,
+    /** Comma separated, capped when saved. */
+    val synonyms: String? = null,
+    /** One of the rarity bands, or null when the pack had no frequency for the word. */
+    val rarity: String? = null,
+    /** Rank and span of the pack's frequency list, the tie break a four step band cannot give. */
+    val freqRank: Int? = null,
+    val freqTotal: Int? = null,
+    /** PACK, ONLINE or CUSTOM. */
+    val source: String = "PACK",
+    /** Which dictionary pack answered, so a stale definition can be spotted later. */
+    val packVersion: String? = null,
+    val bookId: String? = null,
+    /** Snapshot, so a word outlives the book it came from. */
+    val bookTitle: String? = null,
+    val bookHue: Int? = null,
+    val postId: String? = null,
+    val chapterIndex: Int? = null,
+    /** The sentence the word was found in. */
+    val excerpt: String? = null,
+    val createdAt: Long,
+)

@@ -13,6 +13,7 @@ import com.epubfeed.domain.model.ReadingFont
 import com.epubfeed.domain.model.ReadingTextSize
 import com.epubfeed.domain.model.ThemeMode
 import com.epubfeed.domain.model.UserSettings
+import com.epubfeed.domain.model.WordSort
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -33,6 +34,8 @@ class SettingsRepository @Inject constructor(@param:ApplicationContext private v
         val COLLECTION_ORDER = stringPreferencesKey("collection_order")
         val LAST_BOOK = stringPreferencesKey("last_book")
         val SEED_DONE = intPreferencesKey("seed_done")
+        val WORD_SORT = stringPreferencesKey("word_sort")
+        val DICTIONARY_LANGUAGE = stringPreferencesKey("dictionary_language")
     }
 
     val settings: Flow<UserSettings> = context.dataStore.data.map { prefs ->
@@ -42,6 +45,8 @@ class SettingsRepository @Inject constructor(@param:ApplicationContext private v
             textSize = prefs[Keys.TEXT_SIZE].toEnumOrDefault(ReadingTextSize.MEDIUM),
             postLength = PostLength.fromName(prefs[Keys.POST_LENGTH]),
             collectionOrder = prefs[Keys.COLLECTION_ORDER].toEnumOrDefault(CollectionOrder.FIRST_TO_LAST),
+            wordSort = prefs[Keys.WORD_SORT].toEnumOrDefault(WordSort.ALPHABETICAL),
+            dictionaryLanguage = prefs[Keys.DICTIONARY_LANGUAGE] ?: "en",
         )
     }
 
@@ -60,6 +65,12 @@ class SettingsRepository @Inject constructor(@param:ApplicationContext private v
     suspend fun setPostLength(length: PostLength) = putString(Keys.POST_LENGTH, length.name)
 
     suspend fun setCollectionOrder(order: CollectionOrder) = putString(Keys.COLLECTION_ORDER, order.name)
+
+    suspend fun setWordSort(order: WordSort) = putString(Keys.WORD_SORT, order.name)
+
+    suspend fun setDictionaryLanguage(language: String) {
+        putString(Keys.DICTIONARY_LANGUAGE, language)
+    }
 
     suspend fun setLastBookId(bookId: String?) {
         context.dataStore.edit { prefs ->

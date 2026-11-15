@@ -99,6 +99,7 @@ private fun FeedTopBarPreview() {
                 progress = 0.34f,
                 selectedTab = 0,
                 onAvatarClick = {},
+                onSearchClick = {},
                 onSettingsClick = {},
                 onTabSelected = {},
             )

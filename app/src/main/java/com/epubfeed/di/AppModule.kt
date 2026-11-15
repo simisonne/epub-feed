@@ -9,6 +9,7 @@ import com.epubfeed.data.local.NoteDao
 import com.epubfeed.data.local.PostDao
 import com.epubfeed.data.local.ReactionDao
 import com.epubfeed.data.local.StatsDao
+import com.epubfeed.data.local.WordDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -25,7 +26,12 @@ object AppModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, "epub-feed.db")
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
+            .addMigrations(
+                AppDatabase.MIGRATION_1_2,
+                AppDatabase.MIGRATION_2_3,
+                AppDatabase.MIGRATION_3_4,
+                AppDatabase.MIGRATION_4_5,
+            )
             .fallbackToDestructiveMigration(dropAllTables = true)
             .build()
 
@@ -46,6 +52,9 @@ object AppModule {
 
     @Provides
     fun provideStatsDao(db: AppDatabase): StatsDao = db.statsDao()
+
+    @Provides
+    fun provideWordDao(db: AppDatabase): WordDao = db.wordDao()
 
     @Provides
     @Singleton

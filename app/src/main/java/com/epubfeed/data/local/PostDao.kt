@@ -53,6 +53,21 @@ interface PostDao {
     @Query("SELECT * FROM posts WHERE chapterId = :chapterId ORDER BY indexInChapter")
     suspend fun forChapter(chapterId: String): List<PostEntity>
 
+    /** Posts that mention a word, for the "uses in this book" line. LIKE is only a coarse filter. */
+    @Query(
+        "SELECT * FROM posts WHERE bookId = :bookId AND plainText LIKE '%' || :term || '%' " +
+            "ORDER BY globalIndex",
+    )
+    suspend fun matching(bookId: String, term: String): List<PostEntity>
+
+    /** The whole book as plain text, for a full text search. */
+    @Query(
+        "SELECT id AS id, chapterIndex AS chapterIndex, indexInChapter AS indexInChapter, " +
+            "globalIndex AS globalIndex, plainText AS plainText FROM posts " +
+            "WHERE bookId = :bookId ORDER BY globalIndex",
+    )
+    suspend fun searchRows(bookId: String): List<SearchRow>
+
     @Query("SELECT COUNT(*) FROM posts WHERE bookId = :bookId")
     suspend fun countForBook(bookId: String): Int
 

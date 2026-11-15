@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -51,6 +52,7 @@ fun FeedTopBar(
     progress: Float,
     selectedTab: Int,
     onAvatarClick: () -> Unit,
+    onSearchClick: () -> Unit,
     onSettingsClick: () -> Unit,
     onTabSelected: (Int) -> Unit,
 ) {
@@ -104,6 +106,14 @@ fun FeedTopBar(
                 }
             }
             Spacer(Modifier.width(8.dp))
+            IconButton(onClick = onSearchClick, modifier = Modifier.size(44.dp)) {
+                Icon(
+                    imageVector = Icons.Filled.Search,
+                    contentDescription = "Search this book",
+                    tint = x.text,
+                    modifier = Modifier.size(21.dp),
+                )
+            }
             IconButton(onClick = onSettingsClick, modifier = Modifier.size(44.dp)) {
                 Icon(
                     imageVector = Icons.Filled.Settings,

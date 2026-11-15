@@ -7,6 +7,7 @@ import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.Share
@@ -29,6 +30,7 @@ object FeedIcons {
     val BookmarkFilled: ImageVector = Icons.Filled.Bookmark
     val Share: ImageVector = Icons.Outlined.Share
     val Verified: ImageVector = Icons.Filled.Verified
+    val Lookup: ImageVector = Icons.Outlined.MenuBook
 }
 
 fun Modifier.describeAs(text: String): Modifier = this.semantics {

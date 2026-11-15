@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Fully offline: no network permission is declared anywhere in this app. -->
+    <!-- Reading works offline. The network permission is used by exactly one optional thing:
+         downloading a dictionary pack. Nothing about a book ever leaves the device. -->
+
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:name=".EpubFeedApplication"

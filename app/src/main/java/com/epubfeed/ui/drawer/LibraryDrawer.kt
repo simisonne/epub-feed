@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -75,6 +76,7 @@ fun LibraryDrawer(
     currentBookId: String?,
     onSelect: (BookEntity) -> Unit,
     onAddBook: () -> Unit,
+    onOpenWordList: () -> Unit,
     onDelete: (BookEntity) -> Unit,
     onMove: (List<String>) -> Unit,
     modifier: Modifier = Modifier,
@@ -204,6 +206,29 @@ fun LibraryDrawer(
                             modifier = Modifier.size(19.dp),
                         )
                     }
+                }
+            }
+            item(key = "word-list") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onOpenWordList() }
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.MenuBook,
+                        contentDescription = null,
+                        tint = x.text,
+                        modifier = Modifier.size(22.dp),
+                    )
+                    Spacer(Modifier.width(14.dp))
+                    Text(
+                        text = "Word list",
+                        color = x.text,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
                 }
             }
             item(key = "add-book") {

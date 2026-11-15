@@ -14,8 +14,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ReactionEntity::class,
         NoteEntity::class,
         BookStatsEntity::class,
+        WordEntity::class,
     ],
-    version = 3,
+    version = 5,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -25,6 +26,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun reactionDao(): ReactionDao
     abstract fun noteDao(): NoteDao
     abstract fun statsDao(): StatsDao
+
+    abstract fun wordDao(): WordDao
 
     companion object {
         /**
@@ -73,6 +76,56 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE `books` ADD COLUMN `handle` TEXT")
                 db.execSQL("ALTER TABLE `books` ADD COLUMN `avatarPath` TEXT")
                 db.execSQL("ALTER TABLE `books` ADD COLUMN `libraryOrder` INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        /**
+         * Adds the saved word list. The table has no foreign key to `books` on purpose: a word has
+         * to survive its book being deleted, or the sample book being reseeded on a version bump.
+         */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `words` (
+                        `id` TEXT NOT NULL,
+                        `term` TEXT NOT NULL,
+                        `termKey` TEXT NOT NULL,
+                        `definition` TEXT NOT NULL,
+                        `partOfSpeech` TEXT,
+                        `synonyms` TEXT,
+                        `rarity` TEXT,
+                        `source` TEXT NOT NULL,
+                        `packVersion` TEXT,
+                        `bookId` TEXT,
+                        `bookTitle` TEXT,
+                        `bookHue` INTEGER,
+                        `postId` TEXT,
+                        `chapterIndex` INTEGER,
+                        `excerpt` TEXT,
+                        `createdAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS `index_words_termKey_bookId` " +
+                        "ON `words` (`termKey`, `bookId`)",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_words_bookId` ON `words` (`bookId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_words_createdAt` ON `words` (`createdAt`)")
+            }
+        }
+
+        /**
+         * Adds the frequency position to a saved word, so the list can sort by rarity with the
+         * rank as the tie break instead of falling back to the alphabet after four bands. Words
+         * saved before this have no rank and sort last until they are looked up again.
+         */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `words` ADD COLUMN `freqRank` INTEGER")
+                db.execSQL("ALTER TABLE `words` ADD COLUMN `freqTotal` INTEGER")
             }
         }
     }

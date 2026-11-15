@@ -41,9 +41,10 @@ data class SettingsActions(
     val setTextSize: (ReadingTextSize) -> Unit,
     val setPostLength: (PostLength) -> Unit,
     val setCollectionOrder: (CollectionOrder) -> Unit,
+    val setDictionaryLanguage: (String) -> Unit,
 )
 
-/** The "Aa" sheet: type size, font, post length and theme. */
+/** The "Aa" sheet: type size, font, post length, theme and the dictionary. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsSheet(
@@ -143,6 +144,11 @@ fun SettingsSheet(
                     }
                 },
                 onSelect = actions.setTheme,
+            )
+
+            DictionarySettings(
+                dictionaryLanguage = settings.dictionaryLanguage,
+                onSelectLanguage = actions.setDictionaryLanguage,
             )
 
             Spacer(Modifier.height(20.dp))

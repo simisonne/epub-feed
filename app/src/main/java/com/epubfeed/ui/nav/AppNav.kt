@@ -21,6 +21,7 @@ import com.epubfeed.data.repo.ImportState
 import com.epubfeed.ui.feed.FeedScreen
 import com.epubfeed.ui.import.ImportOverlay
 import com.epubfeed.ui.profile.ProfileScreen
+import com.epubfeed.ui.words.WordListScreen
 import com.epubfeed.ui.settings.AppSettingsViewModel
 import com.epubfeed.ui.settings.SettingsActions
 import com.epubfeed.ui.theme.EpubFeedTheme
@@ -45,6 +46,7 @@ fun AppNav(
             setTextSize = settingsViewModel::setTextSize,
             setPostLength = settingsViewModel::setPostLength,
             setCollectionOrder = settingsViewModel::setCollectionOrder,
+            setDictionaryLanguage = settingsViewModel::setDictionaryLanguage,
         )
     }
 
@@ -67,6 +69,7 @@ fun AppNav(
                         settingsActions = actions,
                         onImportUri = onImportUri,
                         onOpenProfile = { id -> navController.navigate("profile/$id") },
+                        onOpenWordList = { navController.navigate(WordsRoute) },
                     )
                 }
                 composable(
@@ -79,6 +82,13 @@ fun AppNav(
                         settingsActions = actions,
                         onImportUri = onImportUri,
                         onOpenProfile = { id -> navController.navigate("profile/$id") },
+                        onOpenWordList = { navController.navigate(WordsRoute) },
+                    )
+                }
+                composable(route = WordsRoute) {
+                    WordListScreen(
+                        onBack = { navController.popBackStack() },
+                        onOpenBook = { id -> navController.navigateToBook(id) },
                     )
                 }
                 composable(
@@ -102,6 +112,7 @@ fun AppNav(
 private const val HomeRoute = "home"
 private const val BookRoute = "book/{bookId}"
 private const val ProfileRoute = "profile/{bookId}"
+private const val WordsRoute = "words"
 
 private fun NavHostController.navigateToBook(bookId: String) {
     navigate("book/$bookId") {

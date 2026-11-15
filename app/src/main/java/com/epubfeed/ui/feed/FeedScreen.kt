@@ -65,6 +65,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.epubfeed.domain.model.BlockType
 import com.epubfeed.domain.model.FeedPost
 import com.epubfeed.domain.model.UserSettings
 import com.epubfeed.ui.components.BookAvatar
@@ -73,6 +74,8 @@ import com.epubfeed.ui.components.PinnedWelcomePost
 import com.epubfeed.ui.drawer.LibraryDrawer
 import com.epubfeed.ui.drawer.LibraryDrawerLayout
 import com.epubfeed.ui.drawer.LibraryDrawerState
+import com.epubfeed.ui.lookup.LookupScreen
+import com.epubfeed.ui.search.BookSearchScreen
 import com.epubfeed.ui.settings.SettingsActions
 import com.epubfeed.ui.settings.SettingsSheet
 import com.epubfeed.ui.theme.LocalXColors
@@ -91,6 +94,7 @@ fun FeedScreen(
     settingsActions: SettingsActions,
     onImportUri: (Uri) -> Unit,
     onOpenProfile: (String) -> Unit,
+    onOpenWordList: () -> Unit,
     viewModel: FeedViewModel = hiltViewModel(),
 ) {
     val ui by viewModel.uiState.collectAsStateWithLifecycle()
@@ -106,6 +110,8 @@ fun FeedScreen(
     var showSettings by remember { mutableStateOf(false) }
     var noteTarget by remember { mutableStateOf<FeedPost?>(null) }
     var menuTarget by remember { mutableStateOf<FeedPost?>(null) }
+    var lookupTarget by remember { mutableStateOf<FeedPost?>(null) }
+    var searching by remember { mutableStateOf(false) }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) onImportUri(uri)
@@ -181,6 +187,10 @@ fun FeedScreen(
                     drawerState.isOpen = false
                     picker.launch(MIME_TYPES)
                 },
+                onOpenWordList = {
+                    drawerState.isOpen = false
+                    onOpenWordList()
+                },
                 onDelete = { target -> viewModel.deleteBook(target) },
                 onMove = { ids -> viewModel.moveBooks(ids) },
             )
@@ -212,6 +222,7 @@ fun FeedScreen(
                     },
                     selectedTab = pagerState.currentPage,
                     onAvatarClick = { drawerState.isOpen = true },
+                    onSearchClick = { searching = true },
                     onSettingsClick = { showSettings = true },
                     onTabSelected = { selected ->
                         viewModel.onReadingInteraction()
@@ -387,7 +398,40 @@ fun FeedScreen(
                 menuTarget = null
                 noteTarget = post
             },
+            hasText = post.blocks.any { it.type != BlockType.IMAGE && it.text.isNotBlank() },
+            onLookUp = {
+                menuTarget = null
+                lookupTarget = post
+            },
             onDismiss = { menuTarget = null },
+        )
+    }
+
+    lookupTarget?.let { post ->
+        LookupScreen(
+            post = post,
+            book = book,
+            fontSize = readingSize,
+            fontFamily = readingFamily,
+            onDismiss = { lookupTarget = null },
+            onOpenSettings = {
+                lookupTarget = null
+                showSettings = true
+            },
+        )
+    }
+
+    if (searching && book != null) {
+        BookSearchScreen(
+            bookId = book.id,
+            chapters = ui.chapters,
+            onOpenHit = { hit ->
+                searching = false
+                // The hit is a post of this book, so the place it names is the position to open.
+                viewModel.openPost(hit.globalIndex)
+                scope.launch { pagerState.animateScrollToPage(0) }
+            },
+            onDismiss = { searching = false },
         )
     }
 }

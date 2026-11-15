@@ -26,7 +26,8 @@ on the phone, keeps the book in Room as chapters of source blocks, and renders o
 one feed. The chapter title opens the thread, paragraphs become posts, likes and notes hang off
 them, and when the chapter runs out a single blue button takes you to the next one.
 
-**No network permission at all.** A book never leaves the device.
+**Your books never leave the device.** The one network call the app can make is an optional
+dictionary download.
 
 <p align="center">
   <img src="docs/screenshots/feed.png" width="310" alt="The feed, with the chapter title opening the thread">
@@ -41,6 +42,9 @@ them, and when the chapter runs out a single blue button takes you to the next o
 | **Reading** | Import an EPUB or a PDF and read it as a feed. EPUB is parsed by hand (ZIP, `container.xml`, OPF manifest and spine, XHTML through Jsoup, chapter titles from the EPUB 3 nav document or the EPUB 2 NCX). PDF text comes from pdfbox-android and splits on the outline. The parsed book is stored in Room, so reopening never touches the original file again. |
 | **Post length** | Paragraphs are grouped into posts under a character budget when the book is imported. Short, medium or long can be changed later without losing your place, likes or notes. |
 | **Notes** | Tap the speech bubble under any post to reply to it. A 280 character composer shows the post you are replying to and the notes already on it, and notes render under the post. |
+| **Search** | The magnifier in the header searches the whole book. Every hit is a post with the chapter it sits in, how far into that chapter, and the passage with the matched words highlighted. Every word of the query has to appear as a whole word, inflections still match (`houses` finds `house`), a phrase in order outranks the same words apart, and tapping a hit opens that post. |
+| **Word list** | Long press a post, choose *Look up a word*, select a word and save it with its definition, synonyms, rarity band and the sentence it came from. The list reads A to Z by default, and sorts by rarity (rarest first, with the dictionary's frequency rank as the tie break), newest, or by book. Words no dictionary holds can still be saved, and they belong to the book they were found in. |
+| **Dictionaries** | English, German and Korean packs download once from the GitHub release and then answer offline. Every installed language is asked, the chosen one first. |
 | **Likes and saves** | Liking pops with haptics. Separate **Likes** and **Saved** tabs list everything, and tapping an entry jumps the feed back to that post. |
 | **Chapters you control** | Mark any post as the start of a chapter when detection gets it wrong, or unmark a chapter's first post to fold it back into the one before. Both re-slice the book, keep likes, bookmarks and notes on the same source text, and park the feed on the post you touched. |
 | **Your place** | The position is remembered per book and restored on launch, chapter and all, even after the book has been re-sliced. The percentage under a post is measured against the chapter being read, not the book. |
@@ -59,12 +63,12 @@ them, and when the chapter runs out a single blue button takes you to the next o
 
 ## Install
 
-Download `epub-feed-1.9.apk` from [Releases](https://github.com/simisonne/epub-feed/releases/latest)
+Download `epub-feed-1.11.apk` from [Releases](https://github.com/simisonne/epub-feed/releases/latest)
 and open it on a phone running Android 8.0 or newer, or push it over `adb`.
 
 | Step | Command |
 | --- | --- |
-| Install the release | `adb install -r epub-feed-1.9.apk` |
+| Install the release | `adb install -r epub-feed-1.11.apk` |
 | Get the code | `git clone https://github.com/simisonne/epub-feed.git` |
 | Point Gradle at your SDK | `echo "sdk.dir=/path/to/Android/sdk" > local.properties` |
 | Build the APK | `./gradlew assembleDebug` |
@@ -110,8 +114,10 @@ they run on the JVM, so no device is needed.
 
 ## Privacy
 
-Everything stays on the device. The app declares no `INTERNET` permission, has no analytics and
-no accounts. Backups are disabled on purpose (`allowBackup="false"`).
+Everything stays on the device. The `INTERNET` permission exists for one thing only: fetching a
+dictionary pack when you press Download in Reading settings. A book is never uploaded, there is no
+analytics and no account, and nothing about your reading leaves the phone. Backups are disabled on
+purpose (`allowBackup="false"`), so the word list exports itself as JSON when you ask it to.
 
 ## Known limits
 

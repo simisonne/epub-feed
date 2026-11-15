@@ -9,6 +9,7 @@ import com.epubfeed.domain.model.ReadingFont
 import com.epubfeed.domain.model.ReadingTextSize
 import com.epubfeed.domain.model.ThemeMode
 import com.epubfeed.domain.model.UserSettings
+import com.epubfeed.domain.model.WordSort
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -43,5 +44,13 @@ class AppSettingsViewModel @Inject constructor(
 
     fun setCollectionOrder(order: CollectionOrder) {
         viewModelScope.launch { settingsRepository.setCollectionOrder(order) }
+    }
+
+    fun setWordSort(order: WordSort) {
+        viewModelScope.launch { settingsRepository.setWordSort(order) }
+    }
+
+    fun setDictionaryLanguage(language: String) {
+        viewModelScope.launch { settingsRepository.setDictionaryLanguage(language) }
     }
 }

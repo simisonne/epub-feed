@@ -25,4 +25,11 @@ data class UserSettings(
     val textSize: ReadingTextSize = ReadingTextSize.MEDIUM,
     val postLength: PostLength = PostLength.MEDIUM,
     val collectionOrder: CollectionOrder = CollectionOrder.FIRST_TO_LAST,
+    /** How the word list reads. Alphabetical by default: a word list is looked things up in. */
+    val wordSort: WordSort = WordSort.ALPHABETICAL,
+    /**
+     * Which installed dictionary answers first. With English and German on the device this is what
+     * stops a German word from being answered by the English dictionary.
+     */
+    val dictionaryLanguage: String = "en",
 )
