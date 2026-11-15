@@ -133,6 +133,8 @@ class BookSearchTest {
         val result = BookSearch.run(posts, "gloaming", limit = 2)
         assertEquals(2, result.hits.size)
         assertTrue(result.capped)
+        // The count is what the book holds, not what fits on screen.
+        assertEquals(5, result.total)
     }
 
     @Test
@@ -140,6 +142,24 @@ class BookSearchTest {
         val result = BookSearch.run(listOf(post("a", "text")), "   ")
         assertTrue(result.hits.isEmpty())
         assertTrue(result.terms.isEmpty())
+    }
+
+    @Test
+    fun `a korean word finds itself with a particle attached`() {
+        val posts = listOf(
+            post("a", "사랑은 마음속에서 천천히 자라는 감정이다."),
+            post("b", "오늘 아침에는 하늘이 맑았다."),
+        )
+        val result = BookSearch.run(posts, "사랑")
+        assertEquals(1, result.hits.size)
+        assertEquals("a", result.hits.first().postId)
+    }
+
+    @Test
+    fun `a korean selection with its particle still finds the plain word`() {
+        val posts = listOf(post("a", "그는 사랑을 알았다."))
+        assertEquals(1, BookSearch.run(posts, "사랑은").hits.size)
+        assertEquals(1, BookSearch.run(posts, "사랑을").hits.size)
     }
 
     @Test

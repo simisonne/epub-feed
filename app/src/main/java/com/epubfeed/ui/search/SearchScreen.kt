@@ -166,10 +166,9 @@ private fun SearchStatus(state: SearchViewModel.UiState) {
         state.searching -> "Searching\u2026"
         result == null -> null
         result.hits.isEmpty() -> "No post holds those words."
-        !result.everyTerm -> "No post holds every word. These hold at least one of them."
-        result.capped -> "First ${result.hits.size} posts. Narrow the search to see the rest."
-        result.hits.size == 1 -> "1 post"
-        else -> "${result.hits.size} posts"
+        // The count is every match the book holds, even when only the first few are drawn.
+        !result.everyTerm -> "Found ${matches(result.total)}, none holds every word"
+        else -> "Found ${matches(result.total)}"
     }
     if (message == null) {
         Spacer(Modifier.height(8.dp))
@@ -209,6 +208,8 @@ private fun SearchHitRow(hit: SearchHit, chapters: List<ChapterSummary>, onClick
         )
     }
 }
+
+private fun matches(count: Int): String = if (count == 1) "1 match" else "$count matches"
 
 /** "Chapter 4, 62%", or the chapter's own title when it has one. */
 private fun where(hit: SearchHit, chapters: List<ChapterSummary>): String {

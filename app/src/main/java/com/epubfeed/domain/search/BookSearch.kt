@@ -33,6 +33,8 @@ data class SearchResult(
     val terms: List<String> = emptyList(),
     /** True when the hits hold every word. False means the loose pass ran: some words only. */
     val everyTerm: Boolean = true,
+    /** Every post that matched, including the ones past the cap, so the count is the real one. */
+    val total: Int = 0,
     /** True when there were more hits than the cap. */
     val capped: Boolean = false,
 )
@@ -123,6 +125,7 @@ object BookSearch {
             hits = ranked.take(limit).map { it.toHit() },
             terms = terms,
             everyTerm = everyTerm,
+            total = ranked.size,
             capped = ranked.size > limit,
         )
     }
@@ -202,9 +205,16 @@ object BookSearch {
         }
     }
 
-    private fun wordPattern(form: String): Regex = Regex(
-        "(?<![\\p{L}\\p{N}])" + Regex.escape(form) + "(?![\\p{L}\\p{N}])",
-    )
+    /**
+     * A word is matched whole, so "art" never matches "earth". Korean is the exception: particles
+     * are glued on, so searching 사랑 has to find 사랑은, 사랑이 and 사랑을 or most of a Korean book
+     * is unreachable. The start boundary still holds.
+     */
+    private fun wordPattern(form: String): Regex = if (WordForms.isHangul(form)) {
+        Regex("(?<![\\p{L}\\p{N}])" + Regex.escape(form))
+    } else {
+        Regex("(?<![\\p{L}\\p{N}])" + Regex.escape(form) + "(?![\\p{L}\\p{N}])")
+    }
 
     /** Overlapping hits from two variants of one word become one highlight. */
     private fun merge(spans: List<Span>): List<Span> {
