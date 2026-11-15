@@ -308,6 +308,11 @@ plain text in one query and matches in memory on `Dispatchers.Default`.
 - Ties break by position in the book, so results read in reading order.
 - If no post holds every word, the pass re-runs as "any word" and the screen says so instead of
   showing an empty list while a word is clearly in the book.
+- Korean is the one exception to the whole word rule: particles are glued on, so 사랑 matches
+  사랑은, 사랑이 and 사랑을 (start boundary only, `WordForms.isHangul`). Without it almost nothing in
+  a Korean book is reachable.
+- The status line counts every match the book holds, `SearchResult.total`, not the first page that
+  the 200 hit cap lets through.
 - Each hit shows the best sentence, cut to a card sized window, with the matched ranges marked. The
   marks are computed against the excerpt, so the highlight lands on the words the matcher found
   rather than on a second string search.
